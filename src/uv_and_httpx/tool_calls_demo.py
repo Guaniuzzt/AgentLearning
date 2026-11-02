@@ -7,6 +7,7 @@
     uv run python -m uv_and_httpx.tool_calls_demo
 """
 
+import json
 import os
 from typing import Any
 
@@ -58,12 +59,10 @@ def send_messages(messages: list[Any]):
     choices = response.choices
     first_choice = choices[0]
 
-    # 把服务端返回的完整内容打出来（含 finish_reason / tool_calls / usage）
-    print("\n========== raw response ==========")
-    print(response.model_dump_json(indent=2))
-    print("==================================")
-
     return first_choice.message
+
+def get_weather(location: str) -> str:
+    return "24℃"
 
 
 messages: list[Any] = [
@@ -76,11 +75,17 @@ message = send_messages(messages)
 assert message.tool_calls, "模型这次没有发起工具调用"
 print(f"Model>\t {message.content}")
 tool = message.tool_calls[0]
+print(f"Model>\t {message}")
+# tool_calls 是联合类型（function / custom），断言一下才能安全取 .function
+assert tool.type == "function", "这里只处理普通 function 调用"
+# arguments 是 JSON 字符串，不是 dict，必须先 load 再取字段
+args: dict[str, Any] = json.loads(tool.function.arguments)
+print(f"Tool>\t {tool.function.name}({args})")
 messages.append(message)
 messages.append({
     "role": "tool",
     "tool_call_id": tool.id,
-    "content": "24℃",  # 这里就是本地执行 get_weather 的结果，示例直接写死
+    "content": get_weather(args["location"]),  # 本地执行工具，结果回传给模型
 })
 
 message = send_messages(messages)
