@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReflectionAgent · 一份被改了四遍的代码</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --desk:#242019;
+    --paper:#fdfbf6;
+    --paper-2:#f7f3ea;
+    --ink:#16130d;
+    --graphite:#5b5445;
+    --graphite-2:#8a8272;
+    --hair:#ddd6c7;
+    --hair-2:#c9c0ad;
+    --pen:#bf3b28;          /* 红笔 */
+    --pen-soft:#f3e2dd;
+    --blue:#2c5f88;
+    --blue-soft:#e4edf4;
+    --green:#2f6b45;
+    --mark:#f7ecb8;
+
+    --serif:"Source Serif 4","Songti SC","SimSun",Georgia,serif;
+    --display:"Instrument Serif","Songti SC","SimSun",Georgia,serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--desk);
+    background-image:
+      radial-gradient(900px 500px at 50% -10%,rgba(255,240,210,.07),transparent 70%),
+      repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 2px,transparent 2px 4px);
+    color:var(--ink);font-family:var(--serif);font-size:17px;line-height:1.78;
+    -webkit-font-smoothing:antialiased;
+    padding:clamp(16px,4vw,48px) clamp(10px,3vw,32px);
+  }
+
+  .sheet{
+    max-width:1040px;margin:0 auto;background:var(--paper);
+    border:1px solid #3a3428;box-shadow:0 40px 80px rgba(0,0,0,.45),0 2px 0 rgba(0,0,0,.2);
+    padding:clamp(28px,5vw,64px) clamp(22px,5vw,72px) clamp(40px,6vw,72px);
+  }
+
+  a{color:var(--blue);text-decoration:none;border-bottom:1px solid rgba(44,95,136,.3)}
+  a:hover{border-bottom-color:var(--blue)}
+  :focus-visible{outline:2px solid var(--pen);outline-offset:3px}
+
+  /* ---------- 封面 ---------- */
+  .cover{padding-bottom:34px;border-bottom:2px solid var(--ink)}
+  .kicker{
+    font-family:var(--mono);font-size:.7rem;letter-spacing:.28em;text-transform:uppercase;
+    color:var(--pen);margin-bottom:18px;
+  }
+  h1{
+    font-family:var(--display);font-weight:400;
+    font-size:clamp(2.4rem,6vw,4rem);line-height:1.02;letter-spacing:-.035em;
+    margin:0 0 18px;
+  }
+  h1 em{font-style:italic}
+  .standfirst{
+    font-size:clamp(1rem,1.5vw,1.14rem);color:var(--graphite);max-width:58ch;margin:0 0 26px;
+  }
+  .byline{
+    display:flex;flex-wrap:wrap;gap:6px 20px;
+    font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;color:var(--graphite-2);
+    border-top:1px solid var(--hair);padding-top:14px;
+  }
+  .byline b{color:var(--ink);font-weight:600}
+
+  /* ---------- 章节 ---------- */
+  section{margin-top:clamp(38px,5vw,56px)}
+  .sec-head{display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--hair);padding-bottom:8px;margin-bottom:22px}
+  .sec-no{font-family:var(--mono);font-size:.66rem;letter-spacing:.2em;color:var(--pen)}
+  h2{font-family:var(--display);font-weight:400;font-size:clamp(1.5rem,3vw,2rem);letter-spacing:-.02em;margin:0;line-height:1.2}
+  h3{font-family:var(--display);font-weight:400;font-size:1.18rem;margin:26px 0 8px;letter-spacing:-.01em}
+  p{margin:0 0 14px}
+  .lead{color:var(--graphite)}
+  strong{font-weight:600}
+
+  /* ---------- 版本卡片 ---------- */
+  .rev{display:grid;grid-template-columns:74px minmax(0,1fr);gap:20px;padding:20px 0;border-bottom:1px dashed var(--hair)}
+  .rev:last-of-type{border-bottom:0}
+  .gutter{position:relative}
+  .vtag{
+    font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;
+    display:inline-block;padding:3px 7px;border:1px solid var(--ink);
+  }
+  .vtag.final{background:var(--ink);color:var(--paper)}
+  .rev-meta{
+    display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px;
+  }
+  .verdict{
+    font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;
+    padding:3px 8px;border:1px solid currentColor;
+  }
+  .verdict.keep{color:var(--green)}
+  .verdict.change{color:var(--blue)}
+  .verdict.revert{color:var(--pen)}
+  .rev h4{
+    font-family:var(--display);font-weight:400;font-size:1.14rem;margin:0;letter-spacing:-.01em;
+  }
+  .rev p{font-size:.93rem;color:var(--graphite);margin:6px 0 10px}
+  .quote{
+    border-left:2px solid var(--pen);padding:6px 0 6px 14px;margin:10px 0;
+    font-style:italic;color:#6b3a31;font-size:.92rem;
+  }
+  .quote::before{content:"评审员 · ";font-style:normal;font-family:var(--mono);font-size:.64rem;letter-spacing:.12em;color:var(--pen);display:block;margin-bottom:3px}
+
+  pre{
+    margin:0;background:var(--paper-2);border:1px solid var(--hair);
+    border-left:2px solid var(--ink);
+    font-family:var(--mono);font-size:.78rem;line-height:1.7;
+    padding:12px 14px;overflow-x:auto;color:#2a251c;
+  }
+  pre .c{color:#8a8272}
+  pre .k{color:var(--pen)}
+  pre .f{color:var(--blue)}
+  pre mark{background:var(--mark);padding:0 2px;border-radius:1px}
+
+  .stamp{
+    position:absolute;right:0;top:0;transform:rotate(-7deg);
+    font-family:var(--mono);font-size:.62rem;letter-spacing:.16em;
+    color:var(--pen);border:2px solid var(--pen);padding:3px 9px;opacity:.85;
+  }
+
+  /* ---------- 结构表 ---------- */
+  .roles{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .role{border:1px solid var(--hair);padding:16px 18px;background:var(--paper-2)}
+  .role .r{font-family:var(--mono);font-size:.62rem;letter-spacing:.16em;color:var(--pen)}
+  .role h4{font-family:var(--display);font-size:1.05rem;font-weight:400;margin:4px 0 8px}
+  .role p{font-size:.88rem;color:var(--graphite);margin:0 0 6px}
+  .role p:last-child{margin:0}
+  .role code{font-family:var(--mono);font-size:.84em;background:#efe9db;padding:1px 4px}
+
+  /* ---------- 流程 ---------- */
+  .flowfig{border:1px solid var(--hair);background:var(--paper-2);padding:16px;margin:6px 0 18px}
+  .flowfig svg{display:block;width:100%;height:auto}
+  .f-box{fill:var(--paper);stroke:#4a4335;stroke-width:1}
+  .f-lab{fill:var(--ink);font-family:"IBM Plex Mono",monospace;font-size:12px}
+  .f-sub{fill:var(--graphite-2);font-family:"IBM Plex Mono",monospace;font-size:10px}
+  .f-line{stroke:#4a4335;stroke-width:1;fill:none}
+  .f-loop{stroke:var(--pen);stroke-width:1.2;fill:none;stroke-dasharray:5 4}
+  .f-red{fill:var(--pen);font-family:"IBM Plex Mono",monospace;font-size:10px}
+
+  ol.steps{margin:0;padding-left:0;list-style:none;counter-reset:s}
+  ol.steps > li{
+    counter-increment:s;position:relative;padding:0 0 16px 44px;
+    border-left:1px solid var(--hair);margin-left:12px;
+  }
+  ol.steps > li:last-child{border-left-color:transparent;padding-bottom:0}
+  ol.steps > li::before{
+    content:counter(s);position:absolute;left:-12px;top:0;
+    width:24px;height:24px;border-radius:50%;background:var(--paper);
+    border:1px solid var(--ink);color:var(--ink);
+    font-family:var(--mono);font-size:.68rem;display:grid;place-items:center;
+  }
+  ol.steps h4{font-family:var(--display);font-weight:400;font-size:1.02rem;margin:0 0 4px}
+  ol.steps p{font-size:.91rem;color:var(--graphite);margin:0 0 6px}
+  .loc{font-family:var(--mono);font-size:.66rem;color:var(--graphite-2);letter-spacing:.04em}
+
+  /* ---------- 数据 ---------- */
+  table{width:100%;border-collapse:collapse;font-size:.88rem}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--hair);vertical-align:top}
+  th{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:var(--graphite-2);font-weight:400;border-bottom:1px solid var(--ink)}
+  td code{font-family:var(--mono);font-size:.85em;background:#efe9db;padding:1px 4px}
+
+  /* ---------- 批注 ---------- */
+  .note{
+    background:var(--pen-soft);border:1px solid #e5c8c1;padding:14px 18px;margin:18px 0;
+    font-size:.92rem;color:#5c2c23;position:relative;
+  }
+  .note b{color:#3d1913}
+  .note::before{
+    content:"编者按";position:absolute;top:-9px;left:14px;background:var(--pen);color:#fff;
+    font-family:var(--mono);font-size:.58rem;letter-spacing:.18em;padding:1px 7px;
+  }
+  .aside{
+    border-left:3px solid var(--hair-2);padding:8px 0 8px 16px;margin:16px 0;
+    font-size:.9rem;color:var(--graphite);font-family:var(--serif);
+  }
+
+  .pen-note{color:var(--pen);font-style:italic}
+  .u-wave{
+    text-decoration:underline;text-decoration-style:wavy;
+    text-decoration-color:var(--pen);text-decoration-thickness:1px;text-underline-offset:4px;
+  }
+
+  ul.tight{margin:0 0 14px;padding-left:20px}
+  ul.tight li{font-size:.93rem;color:var(--graphite);margin-bottom:4px}
+
+  footer{
+    margin-top:44px;border-top:2px solid var(--ink);padding-top:12px;
+    display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between;
+    font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;color:var(--graphite-2);
+  }
+
+  @media (max-width:700px){
+    .rev{grid-template-columns:1fr;gap:8px}
+    .stamp{position:static;display:inline-block;transform:rotate(-3deg);margin-top:8px}
+  }
+
+  @media print{
+    body{background:#fff;padding:0}
+    .sheet{box-shadow:none;border:0;max-width:none}
+    section{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ============ 封面 ============ -->
+  <header class="cover">
+    <div class="kicker">ReflectionAgent · 一次完整运行复盘</div>
+    <h1>一份被改了<br><em>四遍</em>的代码</h1>
+    <p class="standfirst">
+      这是「反思（Reflection）」范式的原始速写：让同一个模型扮演<b>程序员</b>与<b>评审员</b>，
+      反复读稿、挑刺、重写。下面这份记录来自一次真实运行——四个版本、三轮评审，
+      其中第三版被评审自己推翻。它比任何示意图都更能说明这个循环的脾气。
+    </p>
+    <div class="byline">
+      <span><b>模型</b> deepseek-flash</span>
+      <span><b>调用</b> 7 次（1 初始 + 3 反思 + 3 优化）</span>
+      <span><b>轮次</b> max_iterations = 3</span>
+      <span><b>结果</b> 奇数筛 · O(n log log n)</span>
+    </div>
+  </header>
+
+  <!-- ============ 01 改稿轨迹 ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-no">01</span><h2>改稿轨迹：从朴素筛到「绕回来的筛」</h2></div>
+
+    <div class="rev">
+      <div class="gutter"><span class="vtag">v1</span></div>
+      <div>
+        <div class="rev-meta">
+          <h4>初始尝试：标准埃氏筛</h4>
+          <span class="verdict change">R1 → 改</span>
+        </div>
+        <p>模型直接给出全长度筛，用 <code>bytearray</code> 加切片赋值，代码干净。</p>
+<pre><span class="k">sieve</span> = bytearray([1]) * limit          <span class="c"># 为全部整数建筛</span>
+sieve[0:2] = b<span class="c">"\x00\x00"</span>
+<span class="k">for</span> i <span class="k">in</span> range(2, int(limit ** 0.5) + 1):
+    <span class="k">if</span> sieve[i]:
+        sieve[i*i:limit:i] = b<span class="c">"\x00"</span> * count</pre>
+        <div class="quote">
+          该代码已采用埃氏筛，时间复杂度 O(n log log n)，<b>算法层面已属渐进最优</b>；
+          但存在实现层面的常数因子瓶颈：偶数冗余、切片临时内存、<code>int(limit ** 0.5)</code> 的浮点风险。
+        </div>
+        <p>评审给了五条微观优化建议，全部指向「减少一半工作量」，于是有了 v2。</p>
+      </div>
+    </div>
+
+    <div class="rev">
+      <div class="gutter"><span class="vtag">v2</span></div>
+      <div>
+        <div class="rev-meta">
+          <h4>采纳「奇数筛」</h4>
+          <span class="verdict change">R2 → 改</span>
+        </div>
+        <p>只表示奇数，内存与迭代次数各减半；顺手把浮点开方换成精确的 <code>math.isqrt</code>。</p>
+<pre><span class="k">size</span> = (limit + 1) <mark>// 2</mark>          <span class="c"># 只存奇数，长度减半</span>
+sieve = bytearray(b<span class="c">"\x01"</span>) * size
+<span class="k">root</span> = <mark>math.isqrt</mark>(limit - 1)         <span class="c"># 精确开方，无浮点误差</span>
+sieve[start::p] = b<span class="c">"\x00"</span> * count        <span class="c"># 仍是 C 层切片，快</span></pre>
+        <div class="quote">
+          已在算法上最优；但可再进一步：<b>2,3,5-wheel</b> 可减少约 1/3 的筛除操作，
+          切片赋值仍有临时分配，建议考虑 wheel factorization 与向量化提取。
+        </div>
+        <p>这条建议把方向从「常数优化」推向了「重构数据结构」，于是有了 v3。</p>
+      </div>
+    </div>
+
+    <div class="rev" style="position:relative">
+      <div class="gutter"><span class="vtag">v3</span></div>
+      <div>
+        <div class="rev-meta">
+          <h4>采纳「2,3,5-wheel」——过度走火</h4>
+          <span class="verdict revert">R3 → 推翻</span>
+        </div>
+        <p>为了只表示与 30 互质的数，代码引入了残差表、wheel 索引映射和手写步进循环，从 30 行膨胀到 100 多行。</p>
+<pre>residues = (1, 7, 11, 13, 17, 19, 23, 29)
+wheel = ((0,0,0,0,0,0,0,0), (1,7,3,5,2,6,4,0), <span class="c">…六行查表…</span>)
+<span class="k">while</span> cur &lt; limit:                       <span class="c"># 用 Python 循环模拟 wheel 步进</span>
+    idx2 = (cur // 30) * 8 + cur_ri
+    cur += p * gap; cur_ri = next_ri</pre>
+        <div class="quote">
+          当前代码在算法层面<b>并非最优</b>：wheel 的 Python 循环实现引入了大量常数开销，
+          实际性能<b>不如</b>简洁的奇数筛配合切片赋值，建议退回。标准筛可以把主要工作交给 C 层切片，
+          而这里每一步都在解释器里跑。
+        </div>
+        <span class="stamp">REVERTED</span>
+        <p>三轮里最反直觉的一幕：<span class="u-wave">评审把自己上一轮的建议推翻了</span>。</p>
+      </div>
+    </div>
+
+    <div class="rev">
+      <div class="gutter"><span class="vtag final">v4</span></div>
+      <div>
+        <div class="rev-meta">
+          <h4>回退：更简洁的奇数筛</h4>
+          <span class="verdict keep">达到上限 · 采用</span>
+        </div>
+        <p>结构回到 v2，但写法更紧：位移代替除二、索引与步长都省一次算术。</p>
+<pre><span class="k">size</span> = (limit + 1) <mark>&gt;&gt; 1</mark>
+sieve[start::step] = b<span class="c">"\x00"</span> * count   <span class="c"># 批量置零交给 C</span>
+<span class="k">return</span> [2] + [(i &lt;&lt; 1) + 1 <span class="k">for</span> i <span class="k">in</span> range(1, size) <span class="k">if</span> sieve[i]]</pre>
+        <p>
+          循环在 <code>range(max_iterations)</code> 走完后自然结束，没有触发「无需改进」。
+          最终答案就是 v4 的全部代码。
+        </p>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>这段轨迹本身就是一个结论：</b>反思循环没有「目标函数」。评审员每一轮都能找出新缺点，
+      于是代码可能<b>震荡</b>——先因「不够快」变复杂，再因「太复杂」变简单。
+      这次运气不错，落脚点是对的；但换成别的题，第四版完全可能比第一版更差。
+    </div>
+  </section>
+
+  <!-- ============ 02 结构 ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-no">02</span><h2>结构：三个角色，三张模板</h2></div>
+    <p class="lead">
+      整个类只有 40 行有效代码，却由三个互相咬合的部分组成：记忆、循环、取文本。
+    </p>
+
+    <div class="roles">
+      <div class="role">
+        <span class="r">CLASS</span>
+        <h4>Memory</h4>
+        <p>一个 <code>list[dict]</code> 的包装，记录类型只有两种：<code>execution</code>（代码）与 <code>reflection</code>（评审意见）。</p>
+        <p>提供两个读取视角：<code>get_trajectory()</code> 拼成长文本、<code>get_last_execution()</code> 倒序找最近一版代码。</p>
+      </div>
+      <div class="role">
+        <span class="r">CLASS</span>
+        <h4>ReflectionAgent</h4>
+        <p><code>run()</code> 负责节拍：先跑一次初始尝试，再进入 <code>reflect → 判停 → refine</code> 的循环。</p>
+        <p>判停依据是字符串匹配：反馈里出现「无需改进」就 <code>break</code>。</p>
+      </div>
+      <div class="role">
+        <span class="r">METHOD</span>
+        <h4>_get_llm_response()</h4>
+        <p>唯一的出口。把 prompt 包成单条 user 消息丢给 <code>think()</code>，用 <code>or ""</code> 兜住空响应。</p>
+        <p>三个调用点全走它，所以想换模型、加温度、加日志，只改这一处。</p>
+      </div>
+    </div>
+
+    <h3>三张模板，各管一件事</h3>
+    <table>
+      <thead><tr><th>模板</th><th>被谁用</th><th>关键要求</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>INITIAL_PROMPT_TEMPLATE</code></td>
+          <td>首次写代码</td>
+          <td>完整签名 + 文档字符串 + PEP 8；只输出代码，不许解释</td>
+        </tr>
+        <tr>
+          <td><code>REFLECT_PROMPT_TEMPLATE</code></td>
+          <td>每轮评审</td>
+          <td>只看<b>算法效率</b>；要求分析时间复杂度；算法已最优才准说「无需改进」</td>
+        </tr>
+        <tr>
+          <td><code>REFINE_PROMPT_TEMPLATE</code></td>
+          <td>每轮重写</td>
+          <td>必须带着「上一版代码 + 评审反馈」一起改写，不许重起炉灶</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="aside">
+      评审模板里限定「只谈算法效率」，是为了避免模型纠结节风格、变量名。
+      这次运行也验证了这条约束有效：三轮意见全部围绕复杂度与常数因子，没有一句在说命名。
+      但也正是「必须找问题」的设定，逼出了 v3 那种过度优化。
+    </div>
+  </section>
+
+  <!-- ============ 03 流程 ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-no">03</span><h2>执行流程：一次外循环，一次内循环</h2></div>
+
+    <div class="flowfig">
+      <svg viewBox="0 0 880 220" role="img" aria-label="执行流程：初始尝试，然后反思与优化循环，最后输出">
+        <rect class="f-box" x="14" y="74" width="150" height="62" rx="3"/>
+        <text class="f-lab" x="89" y="100" text-anchor="middle">run(task)</text>
+        <text class="f-sub" x="89" y="118" text-anchor="middle">打印任务</text>
+
+        <rect class="f-box" x="196" y="74" width="176" height="62" rx="3"/>
+        <text class="f-lab" x="284" y="100" text-anchor="middle">初始尝试</text>
+        <text class="f-sub" x="284" y="118" text-anchor="middle">1 次调用 → execution</text>
+
+        <rect class="f-box" x="404" y="52" width="180" height="52" rx="3"/>
+        <text class="f-lab" x="494" y="76" text-anchor="middle">反思 reflect</text>
+        <text class="f-sub" x="494" y="92" text-anchor="middle">读最近代码 → 评审</text>
+
+        <rect class="f-box" x="404" y="128" width="180" height="52" rx="3"/>
+        <text class="f-lab" x="494" y="152" text-anchor="middle">优化 refine</text>
+        <text class="f-sub" x="494" y="168" text-anchor="middle">改代码 → execution</text>
+
+        <rect class="f-box" x="620" y="74" width="180" height="62" rx="3"/>
+        <text class="f-lab" x="710" y="100" text-anchor="middle">收尾</text>
+        <text class="f-sub" x="710" y="118" text-anchor="middle">取最后一条 execution</text>
+
+        <path class="f-line" d="M164 105 H 192" marker-end="url(#ar)"/>
+        <path class="f-line" d="M372 96 C 392 96, 392 78, 400 78" marker-end="url(#ar)"/>
+        <path class="f-line" d="M494 104 V 124" marker-end="url(#ar)"/>
+        <path class="f-line" d="M584 154 C 604 154, 604 105, 616 105" marker-end="url(#ar)"/>
+        <path class="f-loop" d="M404 78 C 372 78, 372 154, 400 154" marker-end="url(#ar2)"/>
+        <text class="f-red" x="366" y="120" text-anchor="middle">含「无需改进」则跳出</text>
+
+        <text class="f-sub" x="494" y="206" text-anchor="middle">循环上限 max_iterations = 3（本次跑满）</text>
+
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#4a4335"/>
+          </marker>
+          <marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#bf3b28"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+
+    <ol class="steps">
+      <li>
+        <h4>初始尝试 · 先拿到一份「能跑的草稿」</h4>
+        <p class="loc">run() L104–L108 · add_record("execution", initial_code)</p>
+        <p>不等评审、不看历史，直接按任务写第一版。这一步确保循环永远有一个可批评的对象。</p>
+      </li>
+      <li>
+        <h4>进入循环 · 每轮都是一个「读—评—改」</h4>
+        <p class="loc">for i in range(max_iterations)</p>
+        <p>轮次编号只用于打印，不参与任何逻辑；真正决定结束的是第 4 步的字符串匹配。</p>
+      </li>
+      <li>
+        <h4>反思 · 只看最近一版代码</h4>
+        <p class="loc">L116–L119 · get_last_execution() + REFLECT_PROMPT_TEMPLATE</p>
+        <p>取 <b>最近一条</b> execution，而不是全部历史。所以评审员看到的是「当前稿」，不看你的改稿史——这也解释了 v3 为什么敢推翻 v1 的前提。</p>
+      </li>
+      <li>
+        <h4>判停 · 反馈里是否出现「无需改进」</h4>
+        <p class="loc">L122–L124 · if "无需改进" in feedback: break</p>
+        <p>唯一的提前退出条件。本次三轮都没出现这四个字，所以跑满了上限。</p>
+      </li>
+      <li>
+        <h4>优化 · 带着反馈重写，而不是重写全部</h4>
+        <p class="loc">L128–L134 · REFINE_PROMPT_TEMPLATE → add_record("execution", …)</p>
+        <p>prompt 里同时给了原始任务、上一版代码、评审意见，约束模型「按意见改」。新版本重新进入第 2 步。</p>
+      </li>
+      <li>
+        <h4>收尾 · 最后一版即答案</h4>
+        <p class="loc">L136–L138 · return final_code</p>
+        <p>循环结束后再取一次 <code>get_last_execution()</code>，打印并返回。<b>没有「综合所有版本」的步骤</b>——最新的那份就是最终稿。</p>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ============ 04 记忆结构 ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-no">04</span><h2>记忆里到底存了什么</h2></div>
+    <p class="lead">
+      <code>Memory.records</code> 是整条流水线唯一的持久状态。本次运行结束时它长这样（共 7 条）：
+    </p>
+<pre>[
+  {<span class="f">"type"</span>: <span class="c">"execution"</span>,  <span class="f">"content"</span>: <span class="c">"```python\ndef get_primes_below(...)  # v1 全筛"</span>},
+  {<span class="f">"type"</span>: <span class="c">"reflection"</span>, <span class="f">"content"</span>: <span class="c">"算法已最优，但偶数冗余、切片临时内存…"</span>},
+  {<span class="f">"type"</span>: <span class="c">"execution"</span>,  <span class="f">"content"</span>: <span class="c">"…  # v2 奇数筛"</span>},
+  {<span class="f">"type"</span>: <span class="c">"reflection"</span>, <span class="f">"content"</span>: <span class="c">"建议 2,3,5-wheel + 向量化提取…"</span>},
+  {<span class="f">"type"</span>: <span class="c">"execution"</span>,  <span class="f">"content"</span>: <span class="c">"…  # v3 wheel 实现"</span>},
+  {<span class="f">"type"</span>: <span class="c">"reflection"</span>, <span class="f">"content"</span>: <span class="c">"wheel 的 Python 实现开销巨大，建议退回…"</span>},
+  {<span class="f">"type"</span>: <span class="c">"execution"</span>,  <span class="f">"content"</span>: <span class="c">"…  # v4 奇数筛（终稿）"</span>}
+]</pre>
+
+    <table>
+      <thead><tr><th>读取方式</th><th>返回</th><th>被谁用</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td><code>get_last_execution()</code></td><td><code>str | None</code></td><td>反思、收尾</td><td>倒序遍历，取最近一条 execution</td></tr>
+        <tr><td><code>get_trajectory()</code></td><td><code>str</code></td><td><b>当前未被调用</b></td><td>把全部记录拼成「改稿史」文本</td></tr>
+        <tr><td><code>add_record()</code></td><td><code>None</code></td><td>循环内两处</td><td>写入并打印「记忆已更新」</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      <b>一个现成的改造点：</b><code>get_trajectory()</code> 已经写好了，但 <code>run()</code> 里没有任何调用。
+      如果把它的输出塞进 <code>REFINE_PROMPT_TEMPLATE</code>，评审员就能看到「你上一轮建议过什么、结果如何」，
+      v3 那种来回震荡大概率能减少。
+    </div>
+  </section>
+
+  <!-- ============ 05 边界 ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-no">05</span><h2>四个边界条件</h2></div>
+
+    <ul class="tight">
+      <li>
+        <b>停止靠字符串：</b><code>if "无需改进" in feedback</code>。评审员换个说法（「已是最优」「无明显瓶颈」）就匹配不到，
+        只能跑满 <code>max_iterations</code>。本次即如此——第三轮意见里出现的是「并非最优」。
+      </li>
+      <li>
+        <b>评审只看代码，不跑代码：</b>整个流程没有 <code>exec()</code>、没有测试、没有计时。
+        v3 到底快不快，全凭模型「读」出来的直觉。它这次读对了，但机制上没有任何保证。
+      </li>
+      <li>
+        <b>空响应被静默降级：</b><code>think(...) or ""</code> 把 <code>None</code> 变成空串，
+        后续 <code>split</code>、<code>in</code> 都不会崩，但会得到一版空代码，且没有任何告警。
+      </li>
+      <li>
+        <b>可选项未收紧：</b><code>get_last_execution()</code> 返回 <code>Optional[str]</code>，
+        传给 <code>.format()</code> 前已加 <code>or ""</code>，否则会把字面量 <code>"None"</code> 拼进提示词。
+      </li>
+    </ul>
+
+    <h3>一个纯装饰性的瑕疵</h3>
+    <p>
+      最终打印时会看到两层围栏：
+    </p>
+<pre>--- 任务完成 ---
+最终生成的代码:
+<span class="c">```python</span>          <span class="c">← run() 自己加的一层</span>
+<span class="c">```python</span>          <span class="c">← 模型返回内容自带的一层</span>
+import math
+…</pre>
+    <p>
+      原因：模型输出本身已含 <code>```python</code> 围栏，<code>run()</code> 打印时又包了一次。
+      修法二选一：在 <code>_get_llm_response()</code> 里剥掉围栏，或打印时不再额外包。
+    </p>
+  </section>
+
+  <!-- ============ 06 结论 ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-no">06</span><h2>这个范式值得记住的三件事</h2></div>
+
+    <p>
+      <strong>一、它是「审稿会」，不是「编译器」。</strong>反思的价值在于引入第二个视角，
+      而不在于验证正确性。代码是否真的更快，反思循环自己不知道。
+    </p>
+    <p>
+      <strong>二、没有目标函数，就会震荡。</strong>评审员被要求「必须找出瓶颈」，于是永远能找出新问题；
+      改进方向由最后一句话决定，而不是由一组测试决定。v3 到 v4 的回退，正是这种机制的产物。
+    </p>
+    <p>
+      <strong>三、上下文越长越要小心。</strong>这里只把「最近一版代码」交给评审，看起来是简化，
+      实际是省 token 的必然选择——如果把 4 版代码全塞进去，第三轮的单次 prompt 就会翻倍。
+    </p>
+
+    <div class="aside">
+      想做对比实验，最小改动是：把 <code>max_iterations</code> 设为 1，看只反思一次的结果是否已经接近终稿；
+      再把 <code>get_trajectory()</code> 接进 refine 提示词，观察震荡是否减少。
+      两次运行、四组数据，足够写一节实验记录了。
+    </div>
+  </section>
+
+  <footer>
+    <span>ReflectionAgent.py · 运行复盘</span>
+    <span>7 次调用 · 4 版代码 · 3 轮评审 · 终稿：奇数筛</span>
+  </footer>
+</div>
+</body>
+</html>
