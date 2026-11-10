@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReAct Agent 执行流程解析 · 代码与流程图对照</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f6f1e7;
+    --paper-2:#efe7d7;
+    --card:#fffdf8;
+    --ink:#211d18;
+    --ink-2:#5b5346;
+    --ink-3:#8b8172;
+    --rule:#ddd3c1;
+    --accent:#b5402a;
+    --teal:#2b4a48;
+    --amber:#b3801c;
+    --code-bg:#221f1a;
+    --code-ink:#e9e3d5;
+    --serif:"Newsreader",Georgia,"Songti SC",serif;
+    --display:"Fraunces",Georgia,"Songti SC",serif;
+    --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--serif);
+    font-size:17px;
+    line-height:1.72;
+    -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 12% -10%, rgba(181,64,42,.07), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(43,74,72,.07), transparent 55%);
+    background-attachment:fixed;
+  }
+  body::after{
+    content:"";
+    position:fixed; inset:0; z-index:999; pointer-events:none; opacity:.32;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
+    mix-blend-mode:multiply;
+  }
+
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline;text-underline-offset:3px}
+
+  .skip{
+    position:absolute;left:-9999px;top:0;background:var(--ink);color:var(--paper);
+    padding:10px 16px;z-index:1000;font-family:var(--mono);font-size:.8rem;
+  }
+  .skip:focus{left:12px;top:12px}
+
+  /* ---------- Hero ---------- */
+  .hero{
+    border-bottom:1px solid var(--rule);
+    padding:clamp(48px,7vw,96px) 0 clamp(36px,5vw,64px);
+    position:relative; overflow:hidden;
+  }
+  .hero-inner{max-width:1280px;margin:0 auto;padding:0 clamp(20px,4vw,40px)}
+  .kicker{
+    font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--accent);display:flex;align-items:center;gap:12px;margin-bottom:22px;
+  }
+  .kicker::after{content:"";height:1px;flex:1;background:var(--rule)}
+  h1{
+    font-family:var(--display);font-weight:900;
+    font-size:clamp(2.3rem,6vw,4.4rem);
+    line-height:1.02;letter-spacing:-.02em;margin:0 0 20px;max-width:14ch;
+  }
+  h1 em{font-style:italic;color:var(--accent);font-weight:600}
+  .lede{
+    font-size:clamp(1rem,1.6vw,1.18rem);color:var(--ink-2);max-width:56ch;margin:0 0 30px;
+  }
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:34px}
+  .meta span{
+    font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;
+    border:1px solid var(--rule);background:rgba(255,253,248,.7);
+    padding:5px 10px;border-radius:2px;color:var(--ink-2);
+  }
+  .stats{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:1px;background:var(--rule);border:1px solid var(--rule);max-width:720px;
+  }
+  .stat{background:var(--card);padding:16px 18px}
+  .stat b{display:block;font-family:var(--display);font-size:1.7rem;line-height:1.1;font-weight:600}
+  .stat small{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+
+  /* ---------- Layout ---------- */
+  .wrap{
+    max-width:1280px;margin:0 auto;padding:0 clamp(20px,4vw,40px);
+    display:grid;grid-template-columns:200px minmax(0,1fr);gap:clamp(28px,5vw,64px);
+    align-items:start;
+  }
+  .nav{position:sticky;top:28px;padding:40px 0;font-family:var(--mono);font-size:.76rem}
+  .nav p{letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin:0 0 14px;font-size:.66rem}
+  .nav a{
+    display:block;color:var(--ink-2);padding:7px 0 7px 14px;
+    border-left:2px solid transparent;line-height:1.45;
+  }
+  .nav a:hover{color:var(--ink);text-decoration:none;border-left-color:var(--rule)}
+  .nav a.active{color:var(--accent);border-left-color:var(--accent)}
+
+  main{padding:40px 0 100px;min-width:0}
+  section{margin-bottom:clamp(56px,8vw,96px);scroll-margin-top:24px}
+  .sec-head{display:flex;align-items:baseline;gap:16px;margin-bottom:10px}
+  .sec-num{font-family:var(--mono);font-size:.72rem;letter-spacing:.16em;color:var(--accent)}
+  h2{
+    font-family:var(--display);font-weight:600;font-size:clamp(1.5rem,3vw,2.05rem);
+    letter-spacing:-.01em;margin:0 0 6px;line-height:1.2;
+  }
+  .sec-sub{color:var(--ink-2);margin:0 0 30px;max-width:62ch;font-size:.98rem}
+  h3{font-family:var(--display);font-weight:600;font-size:1.1rem;margin:0;line-height:1.35}
+
+  /* ---------- Component map ---------- */
+  .map{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:0;align-items:stretch;margin:8px 0 12px}
+  .comp{
+    background:var(--card);border:1px solid var(--rule);padding:18px 16px;
+    display:flex;flex-direction:column;gap:6px;
+  }
+  .comp .role{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+  .comp .name{font-family:var(--mono);font-size:.86rem;font-weight:700;color:var(--ink);word-break:break-all}
+  .comp p{margin:0;font-size:.86rem;color:var(--ink-2);line-height:1.6}
+  .arrow{display:grid;place-items:center;color:var(--ink-3);font-family:var(--mono);font-size:1.1rem;padding:0 6px}
+  @media (max-width:900px){
+    .wrap{grid-template-columns:1fr}
+    .nav{position:static;display:flex;flex-wrap:wrap;gap:4px;padding:20px 0 0;border-bottom:1px solid var(--rule)}
+    .nav p{display:none}
+    .nav a{border-left:0;border-bottom:2px solid transparent;padding:8px 10px}
+    .nav a.active{border-left:0;border-bottom-color:var(--accent)}
+    .map{grid-template-columns:1fr}
+    .arrow{padding:8px 0;transform:rotate(90deg)}
+  }
+
+  /* ---------- Explanation blocks ---------- */
+  .block{
+    display:grid;grid-template-columns:52px minmax(0,1fr);gap:18px;
+    padding:26px 0;border-top:1px solid var(--rule);
+  }
+  .block:first-of-type{border-top:0;padding-top:6px}
+  .badge{
+    width:38px;height:38px;border-radius:50%;display:grid;place-items:center;
+    border:1.5px solid var(--ink);font-family:var(--mono);font-size:.86rem;font-weight:700;
+    background:var(--card);margin-top:2px;
+  }
+  .block h3{margin-bottom:4px}
+  .block h3 .anchor{
+    font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;color:var(--ink-3);
+    margin-left:10px;font-weight:400;white-space:nowrap;
+  }
+  .block h3 .anchor:hover{color:var(--accent);text-decoration:none}
+  .block .sub{color:var(--ink-3);font-size:.84rem;margin:0 0 14px;font-family:var(--mono);letter-spacing:.02em}
+  .block p{margin:0 0 12px}
+  .block p:last-child{margin-bottom:0}
+
+  .code{
+    background:var(--code-bg);color:var(--code-ink);
+    font-family:var(--mono);font-size:.79rem;line-height:1.78;
+    padding:16px 18px;border-radius:3px;overflow-x:auto;margin:0 0 14px;
+    tab-size:4;
+  }
+  .code .c{color:#8a8175}
+  .code .k{color:#e5a3a3}
+  .code .s{color:#b9d18a}
+  .code .f{color:#8fc3d4}
+  .code .hl{display:block;margin:0 -18px;padding:0 18px;background:rgba(179,128,28,.16);box-shadow:inset 3px 0 0 var(--amber)}
+  .code .num{color:#5f574a;user-select:none;display:inline-block;width:2.1em}
+
+  dl.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;margin:14px 0 0;font-size:.9rem}
+  dl.kv dt{
+    font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--ink-3);padding-top:4px;white-space:nowrap;
+  }
+  dl.kv dd{margin:0;color:var(--ink-2)}
+  dl.kv dd code{font-family:var(--mono);font-size:.82em;background:rgba(33,29,24,.06);padding:1px 5px;border-radius:2px}
+
+  .note{
+    border-left:3px solid var(--accent);background:rgba(181,64,42,.055);
+    padding:12px 16px;margin:14px 0 0;font-size:.92rem;color:var(--ink-2);
+  }
+  .note b{color:var(--ink)}
+
+  /* ---------- Flowchart ---------- */
+  .legend{display:flex;flex-wrap:wrap;gap:16px;font-family:var(--mono);font-size:.7rem;color:var(--ink-3);margin-bottom:26px}
+  .legend span{display:flex;align-items:center;gap:7px}
+  .swatch{width:14px;height:14px;border:1px solid var(--rule);display:inline-block}
+  .swatch.proc{background:var(--card)}
+  .swatch.dec{background:#fdf6e6;border-color:#e3cf9e}
+  .swatch.term{background:#f1ece2;border-style:dashed;border-color:var(--ink-3)}
+
+  .flow{list-style:none;margin:0;padding:0;position:relative}
+  .flow::before{
+    content:"";position:absolute;left:22px;top:14px;bottom:14px;width:2px;
+    background:linear-gradient(180deg,var(--rule),var(--rule) 92%,transparent);
+  }
+  .flow > li{position:relative;padding:0 0 16px 62px}
+  .flow > li:last-child{padding-bottom:0}
+  .chip{
+    position:absolute;left:0;top:0;width:46px;height:46px;border-radius:50%;
+    display:grid;place-items:center;background:var(--paper);border:2px solid var(--ink);
+    font-family:var(--mono);font-size:.8rem;font-weight:700;z-index:1;
+  }
+  .chip.dec{border-color:#c19a3c;color:#8a6412}
+  .chip.term{border-style:dashed;border-color:var(--ink-3);color:var(--ink-2)}
+  .fc{background:var(--card);border:1px solid var(--rule);padding:14px 18px}
+  .fc h4{margin:0 0 4px;font-family:var(--display);font-size:1rem;font-weight:600}
+  .fc p{margin:0;font-size:.88rem;color:var(--ink-2);line-height:1.62}
+  .fc .tag{font-family:var(--mono);font-size:.64rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:6px}
+  .fc.dec{background:#fdf6e6;border-color:#e3cf9e}
+  .fc.dec .tag{color:#8a6412}
+  .fc.term{background:#f1ece2;border-style:dashed;border-color:var(--ink-3)}
+  .fc.term .tag{color:var(--ink-3)}
+  .fc .ret{
+    display:inline-block;font-family:var(--mono);font-size:.72rem;
+    background:rgba(43,74,72,.1);border:1px solid rgba(43,74,72,.25);color:var(--teal);
+    padding:1px 7px;border-radius:2px;margin-top:8px;
+  }
+  .branch{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:8px}
+  .branch li{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:baseline;font-size:.88rem;color:var(--ink-2)}
+  .branch b{
+    font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;padding:2px 8px;
+    border:1px solid;border-radius:2px;text-align:center;white-space:nowrap;
+  }
+  .branch .yes b{background:#e7f0e9;border-color:#a9c7b1;color:#1f5137}
+  .branch .no b{background:#f8e7e2;border-color:#d8b0a5;color:#7a2c1c}
+  .branch .loop b{background:#eef1f3;border-color:#b9c3c9;color:#3a474e}
+
+  /* ---------- Run trace ---------- */
+  .trace{display:grid;gap:14px;margin:6px 0 0}
+  .step{
+    display:grid;grid-template-columns:64px minmax(0,1fr);gap:18px;
+    background:var(--card);border:1px solid var(--rule);padding:18px 20px;
+  }
+  .step .no{
+    font-family:var(--display);font-size:2rem;font-weight:600;line-height:.9;
+    color:var(--paper-2);-webkit-text-stroke:1px var(--ink-3);
+  }
+  .step h4{margin:0 0 8px;font-family:var(--mono);font-size:.76rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+  .step .act{
+    font-family:var(--mono);font-size:.82rem;background:rgba(33,29,24,.045);
+    border-left:3px solid var(--ink-3);padding:8px 12px;margin:0 0 8px;word-break:break-word;
+  }
+  .step .act.ok{border-left-color:#4f8a63;background:rgba(79,138,99,.08)}
+  .step p{margin:0;font-size:.9rem;color:var(--ink-2)}
+
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0 0}
+  @media (max-width:820px){.compare{grid-template-columns:1fr}}
+  .cmp{border:1px solid var(--rule);padding:16px 18px;background:var(--card)}
+  .cmp h4{margin:0 0 10px;font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase}
+  .cmp.bad{border-color:#d8b0a5;background:#fdf3f0}
+  .cmp.bad h4{color:#7a2c1c}
+  .cmp.good{border-color:#a9c7b1;background:#f2f8f3}
+  .cmp.good h4{color:#1f5137}
+  .cmp pre{
+    margin:0;font-family:var(--mono);font-size:.74rem;line-height:1.7;
+    white-space:pre-wrap;word-break:break-word;color:var(--ink-2);
+  }
+
+  /* ---------- Detail cards ---------- */
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+  .mini{background:var(--card);border:1px solid var(--rule);padding:18px;display:flex;flex-direction:column;gap:8px}
+  .mini .n{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;color:var(--accent)}
+  .mini h4{margin:0;font-family:var(--display);font-size:1rem;font-weight:600}
+  .mini p{margin:0;font-size:.88rem;color:var(--ink-2);line-height:1.65}
+  .mini code{font-family:var(--mono);font-size:.8em;background:rgba(33,29,24,.06);padding:1px 5px}
+
+  footer{
+    border-top:1px solid var(--rule);padding:32px clamp(20px,4vw,40px) 64px;
+    max-width:1280px;margin:0 auto;
+    font-family:var(--mono);font-size:.72rem;color:var(--ink-3);
+    display:flex;flex-wrap:wrap;gap:10px 24px;justify-content:space-between;
+  }
+
+  /* ---------- Motion ---------- */
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .7s ease,transform .7s cubic-bezier(.16,.84,.44,1)}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    .reveal{opacity:1;transform:none;transition:none}
+    body::after{display:none}
+  }
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="kicker">ReActAgent.py · 代码解剖</div>
+    <h1>一个 Agent 的<br><em>三拍</em>循环</h1>
+    <p class="lede">
+      这份页面把 <code style="font-family:var(--mono);font-size:.86em">ReActAgent.run()</code> 拆成七个环节，
+      并用一次真实运行（DeepSeek + SerpApi，3 步出答案）对照说明。
+      每个代码段落都标注了编号，与下方流程图逐点对应。
+    </p>
+    <div class="meta">
+      <span>Python 3.12</span>
+      <span>DeepSeek · deepseek-flash</span>
+      <span>SerpApi · Google</span>
+      <span>loop = 3 步</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>7</b><small>流程环节</small></div>
+      <div class="stat"><b>2</b><small>工具调用</small></div>
+      <div class="stat"><b>1</b><small>Finish 收尾</small></div>
+      <div class="stat"><b>5</b><small>max_steps 上限</small></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="nav" aria-label="章节导航">
+    <p>目录</p>
+    <a href="#overview">01 全局视图</a>
+    <a href="#code">02 代码逐段解读</a>
+    <a href="#flow">03 执行流程图</a>
+    <a href="#trace">04 本次运行实况</a>
+    <a href="#details">05 三个关键细节</a>
+  </nav>
+
+  <main id="main">
+
+    <!-- ========== 01 ========== -->
+    <section id="overview" class="reveal">
+      <div class="sec-head"><span class="sec-num">01</span><h2>全局视图</h2></div>
+      <p class="sec-sub">
+        <code style="font-family:var(--mono);font-size:.86em">ReActAgent</code> 本身不写提示词、不发请求、不搜网页，
+        它只做一件事：<strong>把三样东西串成一个循环</strong>——拼提示、问模型、执行动作。
+        真正的脏活由两个协作者承担。
+      </p>
+
+      <div class="map">
+        <div class="comp">
+          <span class="role">模型层</span>
+          <span class="name">HelloAgentsLLM</span>
+          <p>封装 OpenAI 兼容接口，默认指向 DeepSeek。负责流式调用并返回纯文本。</p>
+        </div>
+        <div class="arrow">→</div>
+        <div class="comp">
+          <span class="role">编排层</span>
+          <span class="name">ReActAgent</span>
+          <p>持有 history，循环「拼提示 → 问模型 → 解析 → 执行」，直到 Finish 或步数耗尽。</p>
+        </div>
+        <div class="arrow">→</div>
+        <div class="comp">
+          <span class="role">工具层</span>
+          <span class="name">ToolExecutor</span>
+          <p>登记工具名 → 函数的映射；<code style="font-family:var(--mono)">Search</code> 背后是 SerpApi 真实搜索。</p>
+        </div>
+      </div>
+
+      <dl class="kv">
+        <dt>输入</dt>
+        <dd>一个自然语言问题，例如 <code>"英伟达最新的GPU型号是什么"</code></dd>
+        <dt>输出</dt>
+        <dd>模型给出的最终答案字符串；中途失败则返回 <code>None</code></dd>
+        <dt>关键状态</dt>
+        <dd><code>self.history</code> —— 一个纯字符串列表，累积每轮的 <code>Action</code> 与 <code>Observation</code>，下一轮原样拼回提示词</dd>
+      </dl>
+    </section>
+
+    <!-- ========== 02 ========== -->
+    <section id="code" class="reveal">
+      <div class="sec-head"><span class="sec-num">02</span><h2>代码逐段解读</h2></div>
+      <p class="sec-sub">
+        下面每段都标了编号（①…⑦），在<a href="#flow">第 03 节流程图</a>里能找到完全相同的编号。
+        读法建议：先看「作用」，再看「输入 / 输出」，最后扫一眼高亮行。
+      </p>
+
+      <!-- 0 -->
+      <div class="block">
+        <div class="badge">0</div>
+        <div>
+          <h3>准备：依赖与提示词模板<span class="anchor">L1–L26</span></h3>
+          <p class="sub">模块级常量 · 全局共享一份</p>
+          <pre class="code"><span class="num">1</span><span class="k">import</span> re
+<span class="num">2</span>
+<span class="num">3</span><span class="k">from</span> uv_and_httpx.ToolExecutor <span class="k">import</span> ToolExecutor
+<span class="num">4</span><span class="k">from</span> uv_and_httpx.chapter4 <span class="k">import</span> HelloAgentsLLM
+<span class="num">5</span><span class="k">from</span> openai.types.chat <span class="k">import</span> ChatCompletionMessageParam
+
+<span class="num">9</span><span class="hl">REACT_PROMPT_TEMPLATE = <span class="s">"""
+Thought: 你的思考过程…
+Action: 你决定采取的行动…
+  - 工具名[参数]  或  Finish[最终答案]
+Question: {question}
+History: {history}
+"""</span></span></pre>
+          <p>
+            模板是整个 Agent 的「行为契约」：它告诉模型<strong>必须先想再动</strong>，且只能输出两种动作形态。
+            <code style="font-family:var(--mono);font-size:.85em">{tools}</code>、<code style="font-family:var(--mono);font-size:.85em">{question}</code>、<code style="font-family:var(--mono);font-size:.85em">{history}</code>
+            三个占位符留给 <code style="font-family:var(--mono);font-size:.85em">.format()</code> 填；
+            而 <code style="font-family:var(--mono);font-size:.85em">{{tool_name}}</code> 用双花括号，是刻意转义成字面量，留给模型看格式，Python 不会去替换它。
+          </p>
+          <dl class="kv">
+            <dt>作用</dt><dd>把「推理格式」固化成文本约定，模型只需照着填</dd>
+            <dt>输出</dt><dd>一个带 3 个命名占位符的字符串常量</dd>
+          </dl>
+        </div>
+      </div>
+
+      <!-- init -->
+      <div class="block">
+        <div class="badge">0</div>
+        <div>
+          <h3>构造：注入两个协作者<span class="anchor">L30–L34</span></h3>
+          <p class="sub">依赖注入 · 不在内部 new</p>
+          <pre class="code"><span class="num">30</span><span class="k">def</span> <span class="f">__init__</span>(self, llm_client: HelloAgentsLLM,
+<span class="num">31</span>             tool_executor: ToolExecutor, max_steps: <span class="f">int</span> = 5):
+<span class="num">32</span>    self.llm_client = llm_client
+<span class="num">33</span>    self.tool_executor = tool_executor
+<span class="num">34</span>    self.max_steps = max_steps
+<span class="num">35</span>    self.history = []          <span class="c"># 跨轮次的唯一记忆</span></pre>
+          <p>
+            模型和工具箱都是<strong>从外部传进来的</strong>，这样测试时可以塞假模型、换真搜索为 mock，
+            而不用改 Agent 一行代码。这就是「依赖注入」最朴素的样子。
+          </p>
+          <div class="note">
+            <b>为什么 history 是 list[str] 而不是 messages？</b>
+            因为每一轮都把历史<strong>塞进同一条 user 提示词</strong>里，而不是维护多轮对话。
+            写法简单、可读，代价是 token 随轮次线性增长。
+          </div>
+        </div>
+      </div>
+
+      <!-- ① -->
+      <div class="block">
+        <div class="badge">①</div>
+        <div>
+          <h3>拼装提示词<span class="anchor">L47–L54 · <a href="#f-1">在流程图中查看 →</a></span></h3>
+          <p class="sub">每轮都重新拼：工具列表 + 原始问题 + 累积历史</p>
+          <pre class="code"><span class="num">48</span>tools_desc  = self.tool_executor.getAvailableTools()
+<span class="num">49</span>history_str = <span class="s">"\n"</span>.join(self.history)
+<span class="num">50</span>prompt = REACT_PROMPT_TEMPLATE.<span class="f">format</span>(
+<span class="num">51</span>    tools=tools_desc, question=question, history=history_str
+<span class="num">52</span>)</pre>
+          <p>
+            三块内容各司其职：<strong>工具清单</strong>告诉模型「你能做什么」，
+            <strong>问题</strong>是固定不变的目标，<strong>历史</strong>是当前已有的证据。
+            注意 <code style="font-family:var(--mono);font-size:.85em">.format()</code> 返回新字符串，模板本身永远不变，所以循环 N 次也安全。
+          </p>
+          <dl class="kv">
+            <dt>输入</dt><dd>question、self.history、工具注册表</dd>
+            <dt>输出</dt><dd>一段完整提示词（含格式说明 + 历史证据）</dd>
+          </dl>
+        </div>
+      </div>
+
+      <!-- ② -->
+      <div class="block">
+        <div class="badge">②</div>
+        <div>
+          <h3>调用模型<span class="anchor">L57–L61 · <a href="#f-2">在流程图中查看 →</a></span></h3>
+          <p class="sub">单条 user 消息 · 流式返回纯文本</p>
+          <pre class="code"><span class="num">57</span>messages: <span class="f">list</span>[ChatCompletionMessageParam] = [
+<span class="num">58</span>    {<span class="s">"role"</span>: <span class="s">"user"</span>, <span class="s">"content"</span>: prompt}
+<span class="num">59</span>]
+<span class="num">60</span>response_text = self.llm_client.<span class="f">think</span>(messages=messages)
+<span class="num">61</span>
+<span class="num">62</span><span class="k">if</span> <span class="k">not</span> response_text:      <span class="c"># 空响应 → 直接放弃</span>
+<span class="num">63</span>    <span class="k">break</span></pre>
+          <p>
+            <code style="font-family:var(--mono);font-size:.85em">think()</code> 内部用 <code style="font-family:var(--mono);font-size:.85em">stream=True</code> 逐字打印，
+            最后把整段内容 join 成一个字符串返回，所以这里拿到的是<strong>完整文本</strong>，不是对象。
+            <code style="font-family:var(--mono);font-size:.85em">if not response_text</code> 同时挡掉了 <code style="font-family:var(--mono);font-size:.85em">None</code> 和空串两种失败。
+          </p>
+          <dl class="kv">
+            <dt>输入</dt><dd>上一步拼好的 prompt</dd>
+            <dt>输出</dt><dd>形如 <code>"Thought: …\nAction: Search[…]"</code> 的文本</dd>
+          </dl>
+        </div>
+      </div>
+
+      <!-- ③ -->
+      <div class="block">
+        <div class="badge">③</div>
+        <div>
+          <h3>解析输出：两个正则各管一段<span class="anchor">L109–L121 · <a href="#f-3">在流程图中查看 →</a></span></h3>
+          <p class="sub">_parse_output() · 把自由文本切成 Thought / Action</p>
+          <pre class="code"><span class="num">113</span>thought_match = re.<span class="f">search</span>(<span class="s">r"Thought:\s*(.*?)(?=\nAction:|$)"</span>, text, re.DOTALL)
+<span class="num">115</span><span class="hl">action_match  = re.<span class="f">search</span>(<span class="s">r"Action:\s*(Finish\[.*\]|\w+\[.*?\])"</span>, text, re.DOTALL)</span>
+<span class="num">116</span>
+<span class="num">117</span>thought = thought_match.<span class="f">group</span>(1).<span class="f">strip</span>() <span class="k">if</span> thought_match <span class="k">else</span> <span class="k">None</span>
+<span class="num">118</span>action  = action_match.<span class="f">group</span>(1).<span class="f">strip</span>()  <span class="k">if</span> action_match  <span class="k">else</span> <span class="k">None</span></pre>
+          <p>
+            Thought 用<strong>前瞻断言</strong> <code style="font-family:var(--mono);font-size:.85em">(?=\nAction:|$)</code> 截到 Action 之前；
+            Action 则限定只能匹配两种形态，<strong>绝不贪婪到文末</strong>。
+          </p>
+          <div class="note">
+            <b>这里曾是最严重的 bug：</b>旧写法 <code style="font-family:var(--mono);font-size:.85em">r"Action:\s*(.*?)$"</code> 配合 <code style="font-family:var(--mono);font-size:.85em">re.DOTALL</code>，
+            为了满足行尾锚点会一路扩到字符串末尾，把后面的 <code style="font-family:var(--mono);font-size:.85em">Observation</code>、第二个 <code style="font-family:var(--mono);font-size:.85em">Thought</code>、
+            甚至 <code style="font-family:var(--mono);font-size:.85em">Finish[…]</code> 全部吞进工具参数，导致拿着脏参数去搜索。
+          </div>
+          <dl class="kv">
+            <dt>输入</dt><dd>模型返回的整段文本</dd>
+            <dt>输出</dt><dd>二元组 <code>(thought, action)</code>，任一可能为 <code>None</code></dd>
+          </dl>
+        </div>
+      </div>
+
+      <!-- ④ -->
+      <div class="block">
+        <div class="badge">④</div>
+        <div>
+          <h3>Finish 分支：收尾并返回<span class="anchor">L75–L85 · <a href="#f-4">在流程图中查看 →</a></span></h3>
+          <p class="sub">成功出口 · 唯一 return 答案的地方</p>
+          <pre class="code"><span class="num">75</span><span class="k">if</span> action.<span class="f">startswith</span>(<span class="s">"Finish"</span>):
+<span class="num">78</span>    finish_match = re.<span class="f">match</span>(<span class="s">r"Finish\[(.*)\]"</span>, action, <span class="hl">re.DOTALL</span>)
+<span class="num">79</span>    <span class="k">if</span> finish_match:
+<span class="num">80</span>        final_answer = finish_match.<span class="f">group</span>(1).<span class="f">strip</span>()
+<span class="num">81</span>    <span class="k">else</span>:
+<span class="num">83</span>        final_answer = action.<span class="f">removeprefix</span>(<span class="s">"Finish"</span>).<span class="f">strip</span>().<span class="f">strip</span>(<span class="s">"[]`"</span>)
+<span class="num">85</span>    <span class="k">return</span> final_answer</pre>
+          <p>
+            三步防御：<strong>① DOTALL</strong> 让答案能跨行；<strong>② 判空</strong>，匹配失败不能直接 <code style="font-family:var(--mono);font-size:.85em">.group(1)</code>；
+            <strong>③ 兜底</strong>，容忍模型写成 <code style="font-family:var(--mono);font-size:.85em">Finish[答案</code> 缺右括号或带反引号的情况。
+          </p>
+          <dl class="kv">
+            <dt>输入</dt><dd>以 <code>Finish</code> 开头的 action 字符串</dd>
+            <dt>输出</dt><dd>剥离标记后的最终答案，直接 <code>return</code> 跳出 run()</dd>
+          </dl>
+        </div>
+      </div>
+
+      <!-- ⑤ -->
+      <div class="block">
+        <div class="badge">⑤</div>
+        <div>
+          <h3>解析工具调用并执行<span class="anchor">L87–L99 · <a href="#f-5">在流程图中查看 →</a></span></h3>
+          <p class="sub">_parse_action() → getTool() → 真正调用</p>
+          <pre class="code"><span class="num">87</span>tool_name, tool_input = self._parse_action(action)
+<span class="num">88</span><span class="k">if</span> <span class="k">not</span> tool_name <span class="k">or</span> <span class="k">not</span> tool_input:
+<span class="num">90</span>    <span class="k">continue</span>                    <span class="c"># 解析失败 → 下一轮</span>
+<span class="num">92</span>
+<span class="num">94</span>tool_function = self.tool_executor.<span class="f">getTool</span>(tool_name)
+<span class="num">95</span><span class="k">if</span> <span class="k">not</span> tool_function:
+<span class="num">96</span>    observation = <span class="s">f"错误:未找到名为 '{tool_name}' 的工具。"</span>
+<span class="num">97</span><span class="k">else</span>:
+<span class="num">98</span>    observation = <span class="f">tool_function</span>(tool_input)</pre>
+          <p>
+            <code style="font-family:var(--mono);font-size:.85em">_parse_action</code> 用 <code style="font-family:var(--mono);font-size:.85em">(\w+)\[(.*)\]</code> 把
+            <code style="font-family:var(--mono);font-size:.85em">Search[关键词]</code> 拆成名字和参数。
+            <strong>模型只负责给参数，执行发生在本地</strong>——这是 Agent 安全模型的根基：
+            模型无权直接触达网络，它只能"申请"一次调用。
+          </p>
+          <dl class="kv">
+            <dt>输入</dt><dd>形如 <code>Search[英伟达最新GPU型号 2025]</code> 的 action</dd>
+            <dt>输出</dt><dd>工具返回的字符串 observation（或错误提示）</dd>
+          </dl>
+        </div>
+      </div>
+
+      <!-- ⑥ -->
+      <div class="block">
+        <div class="badge">⑥</div>
+        <div>
+          <h3>回写历史：让下一轮"记得"<span class="anchor">L101–L103 · <a href="#f-6">在流程图中查看 →</a></span></h3>
+          <p class="sub">整个循环唯一的状态变更点</p>
+          <pre class="code"><span class="num">102</span>self.history.<span class="f">append</span>(<span class="s">f"Action: {action}"</span>)
+<span class="num">103</span>self.history.<span class="f">append</span>(<span class="s">f"Observation: {observation}"</span>)</pre>
+          <p>
+            这两行是 ReAct 的<strong>心脏</strong>。下一轮 ① 会把它们拼回提示词，模型于是看到"我上一步做了什么、得到了什么"，
+            再决定是继续查、还是收尾。<strong>没有这两行，循环就退化成反复问同一个问题。</strong>
+          </p>
+          <dl class="kv">
+            <dt>输入</dt><dd>本轮的 action 与 observation</dd>
+            <dt>输出</dt><dd>history 变长两项 → 回到 ①</dd>
+          </dl>
+        </div>
+      </div>
+
+      <!-- ⑦ -->
+      <div class="block">
+        <div class="badge">⑦</div>
+        <div>
+          <h3>循环出口<span class="anchor">L43 · L105–L107 · <a href="#f-7">在流程图中查看 →</a></span></h3>
+          <p class="sub">while + 三种终止</p>
+          <pre class="code"><span class="num">43</span><span class="k">while</span> current_step &lt; self.max_steps:
+<span class="num">44</span>    current_step += <span class="f">1</span>
+<span class="num">...</span>
+<span class="num">105</span><span class="c"># 循环结束：只有步数耗尽才会走到这里</span>
+<span class="num">106</span><span class="f">print</span>(<span class="s">"已达到最大步数，流程终止。"</span>)
+<span class="num">107</span><span class="k">return</span> <span class="k">None</span></pre>
+          <p>
+            三种终止方式：<strong>④ Finish</strong>（成功，返回答案）、<strong>②③ 的空值检查</strong>（失败，break）、
+            <strong>⑦ 步数耗尽</strong>（兜底，返回 None）。<code style="font-family:var(--mono);font-size:.85em">max_steps</code> 是防死循环和防烧钱的刹车片。
+          </p>
+        </div>
+      </div>
+
+      <!-- main -->
+      <div class="block">
+        <div class="badge">▶</div>
+        <div>
+          <h3>入口：把三件东西装起来<span class="anchor">L128–L143</span></h3>
+          <p class="sub">if __name__ == "__main__" · 直接运行才执行</p>
+          <pre class="code"><span class="num">129</span>tool_executor = ToolExecutor()
+<span class="num">131</span>tool_executor.<span class="f">registerTool</span>(<span class="s">"Search"</span>, <span class="s">"一个网页搜索引擎…"</span>, search)
+<span class="num">138</span>llm_client = HelloAgentsLLM()
+<span class="num">141</span>agent = ReActAgent(llm_client, tool_executor, max_steps=5)
+<span class="num">142</span>answer = agent.<span class="f">run</span>(<span class="s">"英伟达最新的GPU型号是什么"</span>)</pre>
+          <p>
+            注册工具时传的是<strong>函数对象</strong> <code style="font-family:var(--mono);font-size:.85em">search</code>（来自 <code style="font-family:var(--mono);font-size:.85em">uv_and_httpx.search</code>），
+            不是模块——写成 <code style="font-family:var(--mono);font-size:.85em">from uv_and_httpx import search</code> 会拿到模块，调用时报
+            <code style="font-family:var(--mono);font-size:.85em">'module' object is not callable</code>。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 03 ========== -->
+    <section id="flow" class="reveal">
+      <div class="sec-head"><span class="sec-num">03</span><h2>执行流程图</h2></div>
+      <p class="sec-sub">
+        编号与上一节一一对应。圆角虚线框是终止节点，黄色框是判断节点，
+        判断出来的两条分支写在框内，循环用「↺ 回到 ①」标注。
+      </p>
+
+      <div class="legend">
+        <span><i class="swatch proc"></i>处理</span>
+        <span><i class="swatch dec"></i>判断</span>
+        <span><i class="swatch term"></i>终止</span>
+      </div>
+
+      <ol class="flow">
+        <li id="f-0">
+          <div class="chip term">S</div>
+          <div class="fc term">
+            <span class="tag">入口</span>
+            <h4>agent.run("英伟达最新的GPU型号是什么")</h4>
+            <p>history 清空、current_step = 0，进入 while。</p>
+          </div>
+        </li>
+
+        <li id="f-dec-1">
+          <div class="chip dec">?</div>
+          <div class="fc dec">
+            <span class="tag">判断</span>
+            <h4>current_step &lt; max_steps ?</h4>
+            <ul class="branch">
+              <li class="yes"><b>是</b><span>进入本轮，步数 +1</span></li>
+              <li class="no"><b>否</b><span>跳出循环 → 见 <a href="#f-7">⑦ 步数耗尽</a></span></li>
+            </ul>
+          </div>
+        </li>
+
+        <li id="f-1">
+          <div class="chip">①</div>
+          <div class="fc">
+            <span class="tag">处理</span>
+            <h4>拼装 Prompt</h4>
+            <p>工具描述 + 原始问题 + 累积历史 → <code style="font-family:var(--mono);font-size:.85em">.format()</code> 填模板</p>
+          </div>
+        </li>
+
+        <li id="f-2">
+          <div class="chip">②</div>
+          <div class="fc">
+            <span class="tag">处理</span>
+            <h4>llm_client.think(messages)</h4>
+            <p>DeepSeek 流式返回，逐字打印后 join 成完整文本。</p>
+            <ul class="branch">
+              <li class="no"><b>空响应</b><span>打印错误并 break → 落到 <a href="#f-7">⑦</a></span></li>
+            </ul>
+          </div>
+        </li>
+
+        <li id="f-3">
+          <div class="chip">③</div>
+          <div class="fc">
+            <span class="tag">处理</span>
+            <h4>_parse_output() 正则切分</h4>
+            <p>Thought 截到 Action 之前；Action 只取一个完整表达式。</p>
+            <ul class="branch">
+              <li class="no"><b>action 为空</b><span>打印警告并 break → 落到 <a href="#f-7">⑦</a></span></li>
+            </ul>
+          </div>
+        </li>
+
+        <li id="f-dec-2">
+          <div class="chip dec">?</div>
+          <div class="fc dec">
+            <span class="tag">判断</span>
+            <h4>action 以 "Finish" 开头 ?</h4>
+            <ul class="branch">
+              <li class="yes"><b>是</b><span>走 ④ 收尾</span></li>
+              <li class="no"><b>否</b><span>走 ⑤ 工具执行</span></li>
+            </ul>
+          </div>
+        </li>
+
+        <li id="f-4">
+          <div class="chip">④</div>
+          <div class="fc">
+            <span class="tag">处理 · 成功出口</span>
+            <h4>提取最终答案</h4>
+            <p><code style="font-family:var(--mono);font-size:.85em">re.match(..., re.DOTALL)</code> 判空后取 group(1)，失败则走兜底剥离。</p>
+            <span class="ret">return final_answer</span>
+          </div>
+        </li>
+
+        <li id="f-5">
+          <div class="chip">⑤</div>
+          <div class="fc">
+            <span class="tag">处理</span>
+            <h4>_parse_action → getTool → 执行</h4>
+            <p>拆出工具名与参数；查表取函数；本地调用 <code style="font-family:var(--mono);font-size:.85em">search(tool_input)</code>。</p>
+            <ul class="branch">
+              <li class="no"><b>格式无效</b><span><code style="font-family:var(--mono);font-size:.85em">continue</code>：不写 history，直接下一轮</span></li>
+              <li class="no"><b>工具不存在</b><span>observation = 错误提示字符串</span></li>
+            </ul>
+          </div>
+        </li>
+
+        <li id="f-6">
+          <div class="chip">⑥</div>
+          <div class="fc">
+            <span class="tag">处理</span>
+            <h4>history 追加 Action / Observation</h4>
+            <p>状态更新，成为下一轮的输入证据。</p>
+            <ul class="branch">
+              <li class="loop"><b>↺</b><span>回到 <a href="#f-dec-1">步数判断</a>，重新走 ①</span></li>
+            </ul>
+          </div>
+        </li>
+
+        <li id="f-7">
+          <div class="chip term">E</div>
+          <div class="fc term">
+            <span class="tag">终止 · 兜底出口</span>
+            <h4>打印"已达到最大步数"</h4>
+            <p>由「步数耗尽 / 空响应 / 解析不出 Action」三种情况共用。</p>
+            <span class="ret">return None</span>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <!-- ========== 04 ========== -->
+    <section id="trace" class="reveal">
+      <div class="sec-head"><span class="sec-num">04</span><h2>本次运行实况</h2></div>
+      <p class="sec-sub">
+        以下是一次真实执行（修复解析 bug 之后）。三次循环、两次搜索、一次 Finish 收尾。
+      </p>
+
+      <div class="trace">
+        <div class="step">
+          <div class="no">1</div>
+          <div>
+            <h4>① 拼提示 → ② 调模型 → ③ 解析 → ⑤ 执行工具</h4>
+            <p class="act">Action: Search[英伟达最新GPU型号 2025]</p>
+            <p>
+              Thought 判断"知识库不够及时"，选择搜索。SerpApi 返回 3 条：显卡全系列解析、显卡天梯图、
+              RTX 5090 / RTX 5090 D 基于 Blackwell 2.0。→ ⑥ 写入 history。
+            </p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="no">2</div>
+          <div>
+            <h4>① 拼提示（含第 1 步观察）→ ② ③ ⑤</h4>
+            <p class="act ok">Action: Search[英伟达 最新 GPU 型号 2025 Blackwell B200 RTX 5090]</p>
+            <p>
+              模型想确认数据中心型号，发出第二次搜索。注意查询串<strong>干净、无污染</strong>——
+              这正是 ③ 修复后的效果。本轮模型还在同一段文本里附带了 <code style="font-family:var(--mono);font-size:.85em">Finish[…]</code>，
+              但按"一轮一动作"的设计被忽略，留待下一轮。
+            </p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="no">3</div>
+          <div>
+            <h4>① 拼提示（含两轮观察）→ ② ③ → ④ 收尾</h4>
+            <p class="act ok">Action: Finish[分领域答案：消费级 RTX 5090 / 数据中心 B200]</p>
+            <p>
+              模型认为证据充分，直接给出分领域答案。④ 用 DOTALL 完整取出多行内容，
+              <code style="font-family:var(--mono);font-size:.85em">return</code> 退出，全程未触达 ⑦。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="margin:34px 0 6px">一个 bug 的前后对比</h3>
+      <p class="sec-sub" style="margin-bottom:0">
+        同一段模型输出，旧正则会把它整段吞进工具参数；新正则只截取动作本身。
+      </p>
+      <div class="compare">
+        <div class="cmp bad">
+          <h4>✕ 修复前 · r"Action:\s*(.*?)$"</h4>
+          <pre>Action: Search[英伟达 最新 GPU 型号…Blackwell]
+Observation: [1] 英伟达在2025年发布了…
+Thought: 根据搜索结果，可以给出最终答案。
+Action: Finish[…]
+
+→ 工具参数里混入了整段 Observation
+→ SerpApi 收到垃圾查询，结果跑偏
+→ Finish 被埋没，白多跑一轮</pre>
+        </div>
+        <div class="cmp good">
+          <h4>✓ 修复后 · Finish[…] | \w+\[.*?\]</h4>
+          <pre>Action: Search[英伟达 最新 GPU 型号 2025 Blackwell B200 RTX 5090]
+
+→ 参数在第一个 ] 处截止
+→ 查询纯净，命中 RTX 5090 / B200
+→ 下一轮干净地 Finish 收尾</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 05 ========== -->
+    <section id="details" class="reveal">
+      <div class="sec-head"><span class="sec-num">05</span><h2>三个关键细节</h2></div>
+      <p class="sec-sub">这三处决定了这个 Agent 是"能跑"还是"稳跑"。</p>
+
+      <div class="grid3">
+        <div class="mini">
+          <span class="n">DETAIL 01</span>
+          <h4>DOTALL：让点号吃掉换行</h4>
+          <p>
+            默认 <code>.</code> 不匹配 <code>\n</code>，而 LLM 答案天然跨行。
+            <code>re.DOTALL</code> 等于 <code>(?s)</code>，不加就会在多行内容上匹配失败、返回 None。
+          </p>
+        </div>
+        <div class="mini">
+          <span class="n">DETAIL 02</span>
+          <h4>判空：Match 可能是 None</h4>
+          <p>
+            <code>re.search/match</code> 的返回类型是 <code>Match | None</code>。
+            不判空直接 <code>.group()</code>，就是把自己交给 AttributeError——
+            用 <code># pyright: ignore</code> 只会遮住警告，不会拦住崩溃。
+          </p>
+        </div>
+        <div class="mini">
+          <span class="n">DETAIL 03</span>
+          <h4>一次一步：别让模型抢跑</h4>
+          <p>
+            即使模型在同一条响应里既给了 Search 又给了 Finish，循环也只执行第一个。
+            这保证了每步都有真实的 Observation 作为证据，而不是让模型凭空收尾。
+          </p>
+        </div>
+      </div>
+
+      <div class="note" style="margin-top:22px">
+        <b>下一步可以做的事：</b>
+        把解析失败的信息也写进 <code style="font-family:var(--mono);font-size:.85em">history</code>（而不是静默 <code style="font-family:var(--mono);font-size:.85em">continue</code>），
+        模型才能看到自己的格式错误并自我纠正；另外在 <code style="font-family:var(--mono);font-size:.85em">_parse_action</code> 开头清洗反引号，防止模型照抄模板里的 <code style="font-family:var(--mono);font-size:.85em">`工具名[参数]`</code>。
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  <span>ReActAgent.py · 代码与流程图对照</span>
+  <span>DeepSeek deepseek-flash · SerpApi · 3 步运行</span>
+</footer>
+
+<script>
+  const links = Array.from(document.querySelectorAll('.nav a'));
+  const sections = links
+    .map(a => document.querySelector(a.getAttribute('href')))
+    .filter(Boolean);
+
+  if ('IntersectionObserver' in window) {
+    const spy = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        links.forEach(a => {
+          a.classList.toggle('active', a.getAttribute('href') === '#' + entry.target.id);
+        });
+      });
+    }, { rootMargin: '-20% 0px -65% 0px' });
+    sections.forEach(s => spy.observe(s));
+
+    const reveal = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in');
+          reveal.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.06 });
+    document.querySelectorAll('.reveal').forEach(el => reveal.observe(el));
+  } else {
+    document.querySelectorAll('.reveal').forEach(el => el.classList.add('in'));
+  }
+</script>
+</body>
+</html>
