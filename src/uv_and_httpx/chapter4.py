@@ -11,7 +11,7 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 # 加载 .env 文件中的环境变量
@@ -29,6 +29,7 @@ class HelloAgentsLLM:
 
     model: str
     client: OpenAI
+    async_client: AsyncOpenAI
     thinking: bool
     extra_body: dict[str, Any]
 
@@ -68,6 +69,8 @@ class HelloAgentsLLM:
         # thinking 不是 OpenAI 标准字段，靠 extra_body 透传给 DeepSeek
         self.extra_body = {} if thinking else {"thinking": {"type": "disabled"}}
         self.client = OpenAI(api_key=apiKey, base_url=baseUrl, timeout=timeout)
+        # 异步客户端供 arun/athink 使用，避免在事件循环里阻塞
+        self.async_client = AsyncOpenAI(api_key=apiKey, base_url=baseUrl, timeout=timeout)
 
     def think(
         self,
@@ -103,6 +106,42 @@ class HelloAgentsLLM:
 
         except Exception as e:
             print(f"❌ 调用LLM API时发生错误: {e}")
+            return None
+
+    async def athink(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        temperature: float = 0,
+    ) -> str | None:
+        """
+        异步版本的 think：用 AsyncOpenAI 流式 await，不阻塞事件循环。
+
+        超时交给调用方用 asyncio.timeout 统一控制；这里只处理普通异常，
+        取消信号（CancelledError）会继续向上抛，由调用方决定语义。
+        """
+        print(f"🧠 正在调用 {self.model} 模型（异步）...")
+        try:
+            stream = await self.async_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                stream=True,
+                extra_body=self.extra_body,
+            )
+
+            print("✅ 大语言模型响应成功:")
+            collected_content: list[str] = []
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                content = chunk.choices[0].delta.content or ""
+                print(content, end="", flush=True)
+                collected_content.append(content)
+            print()
+            return "".join(collected_content)
+
+        except Exception as e:
+            print(f"❌ 异步调用LLM API时发生错误: {e}")
             return None
 
 

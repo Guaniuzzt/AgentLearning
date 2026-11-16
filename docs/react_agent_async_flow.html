@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f7f2e8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14120e" media="(prefers-color-scheme: dark)">
+<title>异步 ReAct Agent 执行流程 · 代码注释与流程图</title>
+<script>
+  (function () {
+    var root = document.documentElement;
+    root.className += ' js';
+    try {
+      var saved = localStorage.getItem('react-async-theme');
+      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.dataset.theme = saved || (prefersDark ? 'dark' : 'light');
+    } catch (e) {
+      root.dataset.theme = 'light';
+    }
+  })();
+</script>
+<style>
+  /* ============ 设计令牌 ============ */
+  :root{
+    color-scheme: light;
+    --paper:#f7f2e8;
+    --paper-2:#efe7d8;
+    --card:#fffdf8;
+    --ink:#211d18;
+    --ink-2:#57503f;
+    --ink-3:#8a8070;
+    --rule:#ded4c2;
+    --accent:#b5402a;
+    --teal:#2b4a48;
+    --amber:#a9761a;
+    --code-bg:#221f1a;
+    --code-ink:#e8e0d0;
+    --code-dim:#9a917e;
+    --shadow:0 1px 0 rgba(0,0,0,.03), 0 14px 34px -22px rgba(60,45,20,.45);
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Songti SC","Noto Serif CJK SC",Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    --mono:"SF Mono","JetBrains Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  [data-theme="dark"]{
+    color-scheme: dark;
+    --paper:#14120e;
+    --paper-2:#1b1812;
+    --card:#1f1b15;
+    --ink:#eee6d7;
+    --ink-2:#c2b8a4;
+    --ink-3:#8b8171;
+    --rule:#332e26;
+    --accent:#e2705a;
+    --teal:#7fb3ad;
+    --amber:#d9a54a;
+    --code-bg:#100e0a;
+    --code-ink:#ddd4c3;
+    --code-dim:#8b8171;
+    --shadow:0 1px 0 rgba(0,0,0,.2), 0 18px 40px -24px rgba(0,0,0,.85);
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.72;
+    -webkit-font-smoothing:antialiased;
+  }
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto}
+    *{animation:none!important;transition:none!important}
+  }
+  a{color:inherit}
+  code,.mono{font-family:var(--mono);font-size:.86em}
+  .skip{position:absolute;left:-9999px}
+  .skip:focus{left:16px;top:16px;background:var(--card);padding:8px 14px;border-radius:8px;z-index:99}
+
+  /* ============ 主题切换 ============ */
+  .theme-toggle{
+    position:fixed;top:18px;right:18px;z-index:50;
+    width:42px;height:42px;border-radius:50%;
+    border:1px solid var(--rule);background:var(--card);color:var(--ink-2);
+    display:grid;place-items:center;cursor:pointer;
+    box-shadow:var(--shadow);transition:transform .18s ease,color .18s ease;
+  }
+  .theme-toggle:hover{transform:translateY(-2px);color:var(--accent)}
+  .theme-toggle svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  [data-theme="light"] .i-sun{display:none}
+  [data-theme="dark"] .i-moon{display:none}
+
+  /* ============ Hero ============ */
+  .hero{
+    position:relative;overflow:hidden;
+    padding:96px 24px 72px;
+    border-bottom:1px solid var(--rule);
+    background:
+      radial-gradient(900px 320px at 12% -10%, color-mix(in srgb, var(--amber) 16%, transparent), transparent 70%),
+      radial-gradient(760px 300px at 88% 0%, color-mix(in srgb, var(--teal) 14%, transparent), transparent 72%),
+      var(--paper-2);
+  }
+  .hero::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:linear-gradient(var(--rule) 1px,transparent 1px);
+    background-size:100% 42px;opacity:.22;
+    mask-image:linear-gradient(to bottom,transparent,#000 35%,transparent);
+  }
+  .hero-inner{position:relative;max-width:1080px;margin:0 auto;z-index:1}
+  .kicker{
+    display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);margin-bottom:18px;
+  }
+  .kicker::before{content:"";width:26px;height:1px;background:currentColor}
+  .hero h1{
+    font-family:var(--serif);
+    font-size:clamp(38px,6vw,66px);
+    line-height:1.06;margin:0 0 20px;font-weight:600;letter-spacing:-.01em;
+  }
+  .hero h1 em{font-style:italic;color:var(--accent)}
+  .lede{font-size:17px;max-width:62ch;color:var(--ink-2);margin:0 0 26px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:26px}
+  .meta span{
+    font-family:var(--mono);font-size:12px;color:var(--ink-2);
+    border:1px solid var(--rule);border-radius:999px;padding:4px 11px;background:color-mix(in srgb,var(--card) 70%,transparent);
+  }
+  .stats{display:flex;flex-wrap:wrap;gap:14px}
+  .stat{
+    min-width:112px;padding:14px 16px;border:1px solid var(--rule);border-radius:12px;
+    background:var(--card);box-shadow:var(--shadow);
+  }
+  .stat b{display:block;font-family:var(--serif);font-size:26px;line-height:1.1;color:var(--accent)}
+  .stat small{font-size:11.5px;color:var(--ink-3);letter-spacing:.02em}
+
+  /* ============ 布局与导航 ============ */
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px 96px}
+  .nav{
+    position:sticky;top:0;z-index:20;
+    display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+    padding:12px 0;margin-bottom:8px;
+    background:color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--rule);
+  }
+  .nav p{margin:0 14px 0 0;font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase}
+  .nav a{
+    font-size:13px;text-decoration:none;color:var(--ink-2);
+    padding:5px 10px;border-radius:8px;border:1px solid transparent;transition:.16s;
+  }
+  .nav a:hover{color:var(--accent);border-color:var(--rule);background:var(--card)}
+
+  section{padding-top:64px;scroll-margin-top:64px}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:8px}
+  .sec-num{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.1em}
+  .sec-head h2{font-family:var(--serif);font-size:clamp(24px,3.2vw,32px);margin:0;font-weight:600;letter-spacing:-.01em}
+  .sec-sub{max-width:70ch;color:var(--ink-2);margin:0 0 30px;font-size:15.5px}
+  .sec-sub code{background:color-mix(in srgb,var(--teal) 10%,transparent);padding:1px 5px;border-radius:4px;color:var(--teal)}
+
+  /* ============ 组件图 ============ */
+  .map{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:12px;align-items:stretch;margin-bottom:28px}
+  .comp{
+    border:1px solid var(--rule);border-radius:14px;background:var(--card);
+    padding:18px 18px 16px;box-shadow:var(--shadow);position:relative;
+  }
+  .comp .role{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+  .comp .name{display:block;font-family:var(--serif);font-size:19px;margin:4px 0 8px}
+  .comp p{margin:0;font-size:13.5px;color:var(--ink-2);line-height:1.6}
+  .comp p code{color:var(--teal)}
+  .comp.hl{border-color:color-mix(in srgb,var(--accent) 45%,var(--rule))}
+  .comp.hl .name{color:var(--accent)}
+  .map .arrow{display:grid;place-items:center;color:var(--ink-3);font-size:18px}
+
+  /* ============ 流程通用 ============ */
+  .flow{display:flex;flex-direction:column;align-items:stretch}
+  .node{
+    position:relative;display:flex;gap:14px;align-items:flex-start;
+    border:1px solid var(--rule);border-left:4px solid var(--ink-3);
+    border-radius:12px;background:var(--card);padding:16px 18px;
+    box-shadow:var(--shadow);
+  }
+  .node .idx{
+    flex:0 0 auto;font-family:var(--mono);font-size:11.5px;font-weight:700;
+    color:var(--ink-3);border:1px solid var(--rule);border-radius:7px;
+    padding:2px 7px;margin-top:2px;background:var(--paper-2);
+  }
+  .node h4{margin:0 0 5px;font-size:15.5px;font-weight:650;letter-spacing:-.005em}
+  .node p{margin:0;font-size:14px;color:var(--ink-2);line-height:1.62}
+  .node p code{background:color-mix(in srgb,var(--teal) 10%,transparent);color:var(--teal);padding:1px 5px;border-radius:4px}
+  .node .body{flex:1;min-width:0}
+  .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .tag{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;
+    padding:2px 8px;border-radius:999px;border:1px solid var(--rule);color:var(--ink-3);
+  }
+  .tag.async{color:var(--teal);border-color:color-mix(in srgb,var(--teal) 40%,var(--rule))}
+  .tag.time{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--rule))}
+  .tag.pyd{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 45%,var(--rule))}
+
+  .node.model{border-left-color:var(--teal)}
+  .node.tool{border-left-color:var(--amber)}
+  .node.exit{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 5%,var(--card))}
+  .node.degrade{border-left-color:var(--accent);border-style:dashed;background:color-mix(in srgb,var(--amber) 7%,var(--card))}
+  .node.gate{border-left-color:var(--ink-3);border-left-style:dashed;background:var(--paper-2)}
+  .node.gate h4::before{content:"◇ ";color:var(--accent);font-size:13px;vertical-align:1px}
+
+  /* 连接线 */
+  .link{position:relative;height:36px;display:grid;place-items:center}
+  .link::before{content:"";position:absolute;top:0;bottom:9px;left:50%;width:1px;background:var(--rule)}
+  .link::after{
+    content:"";position:absolute;bottom:0;left:50%;transform:translateX(-50%);
+    border:5px solid transparent;border-top-color:var(--rule);
+  }
+  .link span{
+    position:relative;z-index:1;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+    background:var(--paper);padding:0 8px;letter-spacing:.04em;
+  }
+
+  /* 分支 */
+  .branch{display:grid;grid-template-columns:1fr 1fr;gap:18px;position:relative;padding-top:44px}
+  .branch::before{content:"";position:absolute;top:0;left:50%;width:1px;height:24px;background:var(--rule);transform:translateX(-50%)}
+  .branch::after{content:"";position:absolute;top:24px;left:25%;right:25%;height:1px;background:var(--rule)}
+  .lane{position:relative;padding-top:20px}
+  .lane::before{content:"";position:absolute;top:-20px;left:50%;width:1px;height:20px;background:var(--rule);transform:translateX(-50%)}
+  .lane-tag{
+    position:absolute;top:-8px;left:50%;transform:translateX(-50%);
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+    background:var(--paper);border:1px solid var(--rule);border-radius:999px;padding:1px 9px;color:var(--ink-3);white-space:nowrap;
+  }
+  .lane.yes .lane-tag{color:var(--teal);border-color:color-mix(in srgb,var(--teal) 45%,var(--rule))}
+  .lane.no .lane-tag{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--rule))}
+
+  .loopnote{
+    margin-top:6px;display:flex;align-items:center;gap:10px;
+    font-family:var(--mono);font-size:11.5px;color:var(--ink-3);
+    border-top:1px dashed var(--rule);padding-top:12px;
+  }
+  .loopnote b{color:var(--accent);font-weight:600}
+
+  /* ============ 阶段卡（Action 内部） ============ */
+  .stages{display:grid;gap:16px;margin-bottom:22px}
+  .stage{
+    border:1px solid var(--rule);border-radius:14px;background:var(--card);
+    padding:18px 20px;box-shadow:var(--shadow);position:relative;
+  }
+  .stage::before{
+    content:attr(data-n);position:absolute;top:-13px;left:18px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+    background:var(--accent);color:#fff;padding:2px 10px;border-radius:999px;
+  }
+  [data-theme="dark"] .stage::before{color:#1a1713}
+  .stage h4{margin:8px 0 6px;font-size:16px}
+  .stage p{margin:0;color:var(--ink-2);font-size:14px}
+  .stage p + p{margin-top:8px}
+  .stage .out{
+    margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;
+    font-family:var(--mono);font-size:11.5px;
+  }
+  .pill{border:1px solid var(--rule);border-radius:7px;padding:3px 9px;color:var(--ink-2);background:var(--paper-2)}
+  .pill.ok{color:var(--teal);border-color:color-mix(in srgb,var(--teal) 45%,var(--rule))}
+  .pill.bad{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--rule))}
+  .pill.warn{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 50%,var(--rule))}
+
+  /* ============ 时间线 ============ */
+  .timeline{
+    border:1px solid var(--rule);border-radius:14px;background:var(--card);
+    padding:20px;box-shadow:var(--shadow);overflow-x:auto;
+  }
+  .tl-grid{
+    display:grid;grid-template-columns:120px repeat(10,minmax(38px,1fr));
+    gap:4px 0;align-items:center;min-width:560px;
+  }
+  .tl-head{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-align:center;padding-bottom:6px;letter-spacing:.04em}
+  .tl-name{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);padding-right:12px;white-space:nowrap}
+  .tl-cell{height:30px;border-left:1px dashed color-mix(in srgb,var(--rule) 70%,transparent);position:relative}
+  .bar{
+    position:absolute;inset:5px 3px;border-radius:6px;
+    display:grid;place-items:center;font-family:var(--mono);font-size:10.5px;color:#fff;
+  }
+  .bar.run{background:var(--teal)}
+  .bar.wait{background:color-mix(in srgb,var(--amber) 55%,var(--paper));color:var(--ink)}
+  .bar.fail{background:var(--accent)}
+  .bar.done{background:color-mix(in srgb,var(--teal) 32%,var(--paper));color:var(--ink-2)}
+  .tl-legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;font-size:12px;color:var(--ink-3)}
+  .tl-legend i{display:inline-block;width:22px;height:9px;border-radius:3px;margin-right:6px;vertical-align:0}
+  .tl-legend .k1{background:var(--teal)}
+  .tl-legend .k2{background:color-mix(in srgb,var(--amber) 55%,var(--paper))}
+  .tl-legend .k3{background:color-mix(in srgb,var(--teal) 32%,var(--paper))}
+  .tl-legend .k4{background:var(--accent)}
+
+  /* ============ 代码块 ============ */
+  .code{
+    margin:0;padding:18px 20px;border-radius:12px;background:var(--code-bg);color:var(--code-ink);
+    font-family:var(--mono);font-size:12.5px;line-height:1.75;
+    overflow-x:auto;border:1px solid color-mix(in srgb,var(--code-bg) 60%,#000);
+  }
+  .code .c{color:var(--code-dim);font-style:italic}
+  .code .k{color:#e2a76f}
+  .code .s{color:#9dc08b}
+  .code .f{color:#8fb7d4}
+  .code .hl{background:rgba(226,167,111,.13);display:inline-block;width:100%}
+
+  /* ============ 表格 ============ */
+  .table-wrap{overflow-x:auto;border:1px solid var(--rule);border-radius:14px;background:var(--card);box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:640px}
+  th,td{text-align:left;padding:11px 16px;border-bottom:1px solid var(--rule);vertical-align:top}
+  th{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-3);background:var(--paper-2);font-weight:600;white-space:nowrap;
+  }
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:color-mix(in srgb,var(--amber) 6%,transparent)}
+  td code{color:var(--teal);background:color-mix(in srgb,var(--teal) 10%,transparent);padding:1px 5px;border-radius:4px;white-space:nowrap}
+  td.loc{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);white-space:nowrap}
+  td .note{display:block;color:var(--ink-3);font-size:12.5px;margin-top:2px}
+
+  /* ============ 两列信息块 ============ */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{
+    border:1px solid var(--rule);border-radius:14px;background:var(--card);
+    padding:18px 20px;box-shadow:var(--shadow);
+  }
+  .card h3{margin:0 0 10px;font-size:15px;letter-spacing:-.005em}
+  .card ul{margin:0;padding-left:18px;color:var(--ink-2);font-size:14px}
+  .card li{margin:5px 0}
+  .card li code{color:var(--teal)}
+  .card .kv-line{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dashed var(--rule);font-size:13.5px}
+  .card .kv-line:last-child{border-bottom:none}
+  .card .kv-line span:first-child{color:var(--ink-3);font-family:var(--mono);font-size:12px}
+  .card .kv-line span:last-child{text-align:right;color:var(--ink)}
+
+  footer{
+    max-width:1080px;margin:0 auto;padding:34px 24px 60px;
+    border-top:1px solid var(--rule);color:var(--ink-3);font-size:13px;
+    display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;
+  }
+  footer code{color:var(--ink-2)}
+
+  /* ============ 动效 ============ */
+  /* 只有 JS 可用时才隐藏待入场区块，避免脚本失败导致整页空白 */
+  .reveal{transition:opacity .5s ease,transform .5s ease}
+  .js .reveal{opacity:0;transform:translateY(14px)}
+  .js .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion: reduce){
+    .js .reveal{opacity:1;transform:none}
+  }
+
+  /* ============ 响应式 ============ */
+  @media (max-width:900px){
+    .map{grid-template-columns:1fr}
+    .map .arrow{transform:rotate(90deg);padding:4px 0}
+    .cols{grid-template-columns:1fr}
+  }
+  @media (max-width:720px){
+    .hero{padding:72px 20px 52px}
+    .wrap{padding:0 20px 72px}
+    .branch{grid-template-columns:1fr;gap:20px;padding-top:34px}
+    .branch::after{display:none}
+    .lane::before{height:14px}
+    .node{padding:14px 15px;gap:10px}
+    section{padding-top:52px}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+
+<button class="theme-toggle" id="themeToggle" type="button" aria-label="切换明暗主题" aria-pressed="false" title="切换明暗主题">
+  <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8Z"/></svg>
+  <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/></svg>
+</button>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="kicker">ReActAgent.py · 异步改造版解剖</div>
+    <h1>七步一轮，<br>每次失败都<em>有出路</em></h1>
+    <p class="lede">
+      这份页面把 <code class="mono">arun()</code> 的主循环拆成七步，把 <code class="mono">_execute_with_retry()</code>
+      拆成三个阶段，并画出并发限流、超时取消、参数校验与降级的完整路径。
+      流程图上的每个编号都能在源代码里找到对应注释。
+    </p>
+    <div class="meta">
+      <span>Python 3.12</span>
+      <span>asyncio · gather / timeout / Semaphore</span>
+      <span>Pydantic v2</span>
+      <span>DeepSeek · deepseek-flash</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>7</b><small>主循环步骤</small></div>
+      <div class="stat"><b>3</b><small>执行阶段</small></div>
+      <div class="stat"><b>4</b><small>降级出口</small></div>
+      <div class="stat"><b>5</b><small>Observation 状态</small></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="nav" aria-label="章节导航">
+    <p>目录</p>
+    <a href="#overview">01 全局视图</a>
+    <a href="#loop">02 主循环流程</a>
+    <a href="#action">03 单次 Action</a>
+    <a href="#concurrency">04 并发时间线</a>
+    <a href="#annotations">05 注释索引</a>
+    <a href="#cheatsheet">06 速查表</a>
+  </nav>
+
+  <main id="main">
+
+    <!-- ================= 01 ================= -->
+    <section id="overview" class="reveal">
+      <div class="sec-head"><span class="sec-num">01</span><h2>全局视图</h2></div>
+      <p class="sec-sub">
+        <code>ReActAgent</code> 自己不写提示词、不发 HTTP 请求、不解析网页，
+        它只做一件事：把「拼提示 → 问模型 → 执行动作」串成循环。脏活由两个协作者承担。
+      </p>
+
+      <div class="map">
+        <div class="comp">
+          <span class="role">模型层</span>
+          <span class="name">HelloAgentsLLM</span>
+          <p>包装 OpenAI 兼容接口。<code>athink()</code> 异步流式，<code>think()</code> 同步兜底。</p>
+        </div>
+        <div class="arrow">→</div>
+        <div class="comp hl">
+          <span class="role">编排层</span>
+          <span class="name">ReActAgent</span>
+          <p>持有 <code>history</code> 与 <code>observations</code>，跑七步循环，负责并发、超时、重试、降级。</p>
+        </div>
+        <div class="arrow">→</div>
+        <div class="comp">
+          <span class="role">工具层</span>
+          <span class="name">ToolExecutor</span>
+          <p>登记「工具名 → 函数 + 参数模型」，用 Pydantic 校验参数。<code>Search</code> 背后是 DeepSeek Search。</p>
+        </div>
+      </div>
+
+      <div class="cols">
+        <div class="card">
+          <h3>两个状态容器</h3>
+          <ul>
+            <li><code>history</code>：纯文本行，每轮追加 <code>Action:</code> 与 <code>Observation:</code>，下一轮原样拼回提示词。</li>
+            <li><code>observations</code>：结构化记录，整体降级时只挑 <code>status == "ok"</code> 的条目拼答案。</li>
+            <li>两者都只在 <code>gather</code> 返回后串行写入，所以不需要加锁。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>为什么 Semaphore 在运行时创建</h3>
+          <p style="margin:0 0 8px;color:var(--ink-2);font-size:14px">
+            <code>asyncio.Semaphore</code> 会绑定创建时的事件循环。若放在 <code>__init__</code>，
+            同一个 Agent 实例第二次 <code>asyncio.run()</code> 就会因跨循环抛错。
+          </p>
+          <p style="margin:0;color:var(--ink-2);font-size:14px">
+            所以它在 <code>arun()</code> 开头重建——每次运行都是干净的并发额度。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 02 ================= -->
+    <section id="loop" class="reveal">
+      <div class="sec-head"><span class="sec-num">02</span><h2>主循环流程</h2></div>
+      <p class="sec-sub">
+        对应 <code>arun()</code>（L207–L283）。七个编号与代码里的行内注释一一对应；
+        三处 <b>“否”</b> 分支都是降级出口，没有任何一条路径会静默返回 <code>None</code>。
+      </p>
+
+      <div class="flow">
+        <div class="node">
+          <span class="idx">A1</span>
+          <div class="body">
+            <h4>重置运行状态</h4>
+            <p><code>history</code> / <code>observations</code> 清空，按 <code>max_concurrency</code> 重建 <code>Semaphore</code>。</p>
+            <div class="tags"><span class="tag async">async</span><span class="tag">每次 run 独立</span></div>
+          </div>
+        </div>
+
+        <div class="link"></div>
+
+        <div class="node gate">
+          <span class="idx">A2</span>
+          <div class="body">
+            <h4>step &lt;= max_steps ?</h4>
+            <p>循环上限由 <code>AgentConfig.max_steps</code> 控制（默认 5，上限 20）。</p>
+          </div>
+        </div>
+
+        <div class="branch">
+          <div class="lane no">
+            <span class="lane-tag">否 · 步数耗尽</span>
+            <div class="node degrade">
+              <span class="idx">D3</span>
+              <div class="body">
+                <h4>_degrade("达到最大步数")</h4>
+                <p>用已成功的 observe 拼出「不完整答案」，附失败原因。</p>
+              </div>
+            </div>
+          </div>
+          <div class="lane yes">
+            <span class="lane-tag">是 · 进入本轮</span>
+            <div class="node model">
+              <span class="idx">A3</span>
+              <div class="body">
+                <h4>拼提示 + 异步问模型</h4>
+                <p><code>_build_prompt()</code> 填工具清单与 history，<code>_think()</code> 内部用 <code>asyncio.timeout(llm_timeout)</code> 包住。</p>
+                <div class="tags"><span class="tag async">await athink</span><span class="tag time">llm_timeout 90s</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="link"><span>模型返回文本或 None</span></div>
+
+        <div class="node gate">
+          <span class="idx">A4</span>
+          <div class="body">
+            <h4>response_text 为空 ?</h4>
+            <p>超时、鉴权失败、网络异常都会让 <code>_think()</code> 返回 <code>None</code>。</p>
+          </div>
+        </div>
+
+        <div class="branch">
+          <div class="lane yes">
+            <span class="lane-tag">是 · 模型不可用</span>
+            <div class="node degrade">
+              <span class="idx">D1</span>
+              <div class="body">
+                <h4>_degrade("模型调用失败或超时")</h4>
+                <p>此时本轮还没有任何 Observation，直接给出可解释的兜底答案。</p>
+              </div>
+            </div>
+          </div>
+          <div class="lane no">
+            <span class="lane-tag">否 · 有文本</span>
+            <div class="node">
+              <span class="idx">A5</span>
+              <div class="body">
+                <h4>解析并校验模型输出</h4>
+                <p><code>parse_response()</code> 用 <code>ACTION_PATTERN.finditer</code> 收集全部 Action，畸形的单个 Action 只警告并丢弃。</p>
+                <div class="tags"><span class="tag pyd">Pydantic</span><span class="tag">返回 ReActResponse</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="link"></div>
+
+        <div class="node gate">
+          <span class="idx">A6</span>
+          <div class="body">
+            <h4>解析出 Finish ？</h4>
+            <p><code>ReActResponse.is_finished</code> 判断 <code>final_answer</code> 是否非空。</p>
+          </div>
+        </div>
+
+        <div class="branch">
+          <div class="lane yes">
+            <span class="lane-tag">是 · 收工</span>
+            <div class="node exit">
+              <span class="idx">E1</span>
+              <div class="body">
+                <h4>return 最终答案</h4>
+                <p>正常出口。<code>Finish[答案]</code> 允许包含方括号，正则用贪婪匹配取到最后一个 <code>]</code>。</p>
+              </div>
+            </div>
+          </div>
+          <div class="lane no">
+            <span class="lane-tag">否 · 继续</span>
+            <div class="node gate">
+              <span class="idx">A7</span>
+              <div class="body">
+                <h4>actions 为空 ？</h4>
+                <p>模型既没给答案也没给合法动作，说明它跑偏了。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="link"><span>有 Action</span></div>
+
+        <div class="node">
+          <span class="idx">A8</span>
+          <div class="body">
+            <h4>同轮去重 + 并发执行</h4>
+            <p>按 <code>(tool_name, tool_input)</code> 去重后，用 <code>asyncio.gather</code> 一次性发起；每个协程在 <code>_execute_action()</code> 里抢信号量。</p>
+            <div class="tags"><span class="tag async">gather</span><span class="tag time">Semaphore 限流</span><span class="tag">保序返回</span></div>
+          </div>
+        </div>
+
+        <div class="link"><span>全部完成（成功或降级）</span></div>
+
+        <div class="node">
+          <span class="idx">A9</span>
+          <div class="body">
+            <h4>按书写顺序写回 history</h4>
+            <p>失败的结果也写，并带上「已降级」标记，让模型知道哪条路走不通、别再重复踩坑。</p>
+          </div>
+        </div>
+
+        <div class="link"></div>
+
+        <div class="loopnote"><b>↺</b> 回到 A2：history 变长，模型带着新观察进入下一轮</div>
+      </div>
+    </section>
+
+    <!-- ================= 03 ================= -->
+    <section id="action" class="reveal">
+      <div class="sec-head"><span class="sec-num">03</span><h2>单次 Action 的三阶段</h2></div>
+      <p class="sec-sub">
+        <code>_execute_action()</code>（L328）只做限流，真正的逻辑在
+        <code>_execute_with_retry()</code>（L339）。它保证一件事：
+        <b>除取消外，永不抛异常</b>，所有失败都变成一条可读的 <code>ToolObservation</code>。
+      </p>
+
+      <div class="stages">
+        <div class="stage" data-n="阶段 ①">
+          <h4>参数校验：拦在工具执行之前</h4>
+          <p>
+            <code>tool_executor.parseArgs()</code> 用工具声明的 Pydantic 模型校验原始文本。
+            非法参数直接返回，<b>工具函数一次都不会被调用</b>。
+          </p>
+          <p>单参数工具把整段文本映射到唯一字段；多参数工具要求模型输出 JSON。</p>
+          <div class="out">
+            <span class="pill bad">ValidationError → status=invalid_args</span>
+            <span class="pill">attempts=0（没跑过）</span>
+          </div>
+        </div>
+
+        <div class="stage" data-n="阶段 ②">
+          <h4>执行：超时 + 分类重试</h4>
+          <p>
+            <code>asyncio.timeout(tool_timeout)</code> 包住 <code>_call_tool()</code>：
+            协程工具直接 await，同步工具丢进 <code>asyncio.to_thread</code>。
+          </p>
+          <p>失败按类型分流，这是「不浪费时间重试」的关键。</p>
+          <div class="out">
+            <span class="pill ok">协程 → await</span>
+            <span class="pill">同步 → to_thread</span>
+            <span class="pill warn">TimeoutError → 重试</span>
+            <span class="pill warn">ToolError(retryable=True) → 重试</span>
+            <span class="pill bad">ToolError(retryable=False) → 立即降级</span>
+            <span class="pill bad">CancelledError → 向上抛</span>
+          </div>
+        </div>
+
+        <div class="stage" data-n="阶段 ③">
+          <h4>降级：把失败写成一条 Observation</h4>
+          <p>
+            重试用尽后返回 <code>status</code> 为 <code>timeout</code> / <code>error</code> 的观察，
+            文案里明确写「已降级，请用已有信息继续推理」，ReAct 循环照常进入下一轮。
+          </p>
+          <div class="out">
+            <span class="pill warn">timeout / error</span>
+            <span class="pill">写回 history</span>
+            <span class="pill">不中断整个流程</span>
+          </div>
+        </div>
+      </div>
+
+      <pre class="code"><span class="c"># 失败分类决定了「重不重试」，这是 _execute_with_retry 的核心</span>
+<span class="k">except</span> TimeoutError:
+    status = <span class="s">"timeout"</span>          <span class="c"># 偶发，值得重试</span>
+<span class="k">except</span> asyncio.CancelledError:
+    <span class="k">raise</span>                         <span class="c"># 取消不是失败，交给最外层</span>
+<span class="k">except</span> ToolError <span class="k">as</span> e:
+    <span class="k">if</span> <span class="k">not</span> e.retryable:
+        <span class="k">return</span> ToolObservation(...)  <span class="c"># 鉴权 / 余额 / 4xx：立即降级</span>
+<span class="k">except</span> Exception <span class="k">as</span> e:
+    status = <span class="s">"error"</span>             <span class="c"># 未预料异常，同样重试</span>
+
+<span class="k">if</span> attempt &lt;= self.config.tool_retries:
+    delay = <span class="s">0.5</span> * attempt
+    <span class="k">async with</span> asyncio.timeout(delay + <span class="s">1.0</span>):  <span class="c"># 退避等待也要有上界</span>
+        <span class="k">await</span> asyncio.sleep(delay)</pre>
+    </section>
+
+    <!-- ================= 04 ================= -->
+    <section id="concurrency" class="reveal">
+      <div class="sec-head"><span class="sec-num">04</span><h2>并发时间线</h2></div>
+      <p class="sec-sub">
+        模型一轮写了 5 个 Action，<code>max_concurrency = 2</code>。gather 立刻创建 5 个 Task，
+        但只有 2 个能拿到信号量，其余在 <code>async with</code> 上排队——排队不占线程、不消耗重试次数。
+      </p>
+
+      <div class="timeline">
+        <div class="tl-grid">
+          <div class="tl-head" style="text-align:left;padding-left:4px">Action</div>
+          <div class="tl-head">t1</div><div class="tl-head">t2</div><div class="tl-head">t3</div>
+          <div class="tl-head">t4</div><div class="tl-head">t5</div><div class="tl-head">t6</div>
+          <div class="tl-head">t7</div><div class="tl-head">t8</div><div class="tl-head">t9</div><div class="tl-head">t10</div>
+
+          <div class="tl-name">Search[query-A]</div>
+          <div class="tl-cell"><div class="bar run">执行</div></div>
+          <div class="tl-cell"><div class="bar run"></div></div>
+          <div class="tl-cell"><div class="bar done">ok</div></div>
+          <div class="tl-cell"></div><div class="tl-cell"></div><div class="tl-cell"></div>
+          <div class="tl-cell"></div><div class="tl-cell"></div><div class="tl-cell"></div><div class="tl-cell"></div>
+
+          <div class="tl-name">Search[query-B]</div>
+          <div class="tl-cell"><div class="bar run">执行</div></div>
+          <div class="tl-cell"><div class="bar run"></div></div>
+          <div class="tl-cell"><div class="bar run"></div></div>
+          <div class="tl-cell"><div class="bar done">ok</div></div>
+          <div class="tl-cell"></div><div class="tl-cell"></div>
+          <div class="tl-cell"></div><div class="tl-cell"></div><div class="tl-cell"></div><div class="tl-cell"></div>
+
+          <div class="tl-name">Search[query-C]</div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar run">执行</div></div>
+          <div class="tl-cell"><div class="bar run"></div></div>
+          <div class="tl-cell"><div class="bar done">ok</div></div>
+          <div class="tl-cell"></div><div class="tl-cell"></div><div class="tl-cell"></div><div class="tl-cell"></div>
+
+          <div class="tl-name">Calc[2+2]</div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar run">执行</div></div>
+          <div class="tl-cell"><div class="bar done">ok</div></div>
+          <div class="tl-cell"></div><div class="tl-cell"></div><div class="tl-cell"></div><div class="tl-cell"></div>
+
+          <div class="tl-name">Slow[坏工具]</div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar wait">排队</div></div>
+          <div class="tl-cell"><div class="bar fail">超时</div></div>
+          <div class="tl-cell"><div class="bar fail">重试</div></div>
+          <div class="tl-cell"><div class="bar done">降级</div></div>
+          <div class="tl-cell"></div><div class="tl-cell"></div>
+        </div>
+
+        <div class="tl-legend">
+          <span><i class="k1"></i>持有信号量执行中</span>
+          <span><i class="k2"></i>等待信号量</span>
+          <span><i class="k4"></i>失败与重试</span>
+          <span><i class="k3"></i>结束（成功或降级）</span>
+        </div>
+      </div>
+
+      <div class="cols" style="margin-top:18px">
+        <div class="card">
+          <h3>限流位置的选择</h3>
+          <p style="margin:0;color:var(--ink-2);font-size:14px">
+            临界区只包住「执行」这一步，不含拼提示、解析、写历史。
+            这样并发数严格等于<b>同时运行的工具数</b>，而不是含排队的调用数。
+          </p>
+        </div>
+        <div class="card">
+          <h3>为什么不并发问模型</h3>
+          <p style="margin:0;color:var(--ink-2);font-size:14px">
+            每一步都依赖上一步的 Observation，天然串行；
+            并发只发生在同一轮内部的多个独立工具之间。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 05 ================= -->
+    <section id="annotations" class="reveal">
+      <div class="sec-head"><span class="sec-num">05</span><h2>注释索引</h2></div>
+      <p class="sec-sub">
+        代码里的注释分两类：<b>docstring</b> 说明「这个函数负责什么、输入输出是什么、什么情况下会失败」，
+        <b>行内注释</b> 只解释「为什么这么写」——尤其是那些删掉就看不出来的坑。
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>位置</th><th>行号</th><th>注释要点</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>模块 docstring</code></td>
+              <td class="loc">L1–L30</td>
+              <td>自顶向下的调用树；六条改造点；线程模型说明（无共享可变状态并发写，故不加锁）
+                <span class="note">"需要 asyncio 3.11+（依赖 asyncio.timeout 与 Self 类型）"</span>
+              </td>
+            </tr>
+            <tr>
+              <td><code>AgentConfig</code></td>
+              <td class="loc">L77</td>
+              <td>三处计时器的区别：<code>llm_timeout</code>、<code>tool_timeout</code>、退避等待
+                <span class="note">frozen 避免运行期半截状态；extra="forbid" 让拼错字段名立刻报错</span>
+              </td>
+            </tr>
+            <tr>
+              <td><code>ActionCall</code></td>
+              <td class="loc">L104</td>
+              <td>两层校验的第一层：只保证形态，按工具 schema 的严格校验在执行前一刻
+                <span class="note">"这层容忍模型即兴发挥，那层才按 schema 严格拦截"</span>
+              </td>
+            </tr>
+            <tr>
+              <td><code>ToolObservation</code></td>
+              <td class="loc">L142</td>
+              <td>失败也结构化：<code>attempts=0</code> 说明工具压根没跑；<code>toHistory()</code> 给失败加降级标记</td>
+            </tr>
+            <tr>
+              <td><code>ReActAgent</code></td>
+              <td class="loc">L166</td>
+              <td>类级职责：只做编排；一个实例不要被多个任务并发 <code>arun()</code></td>
+            </tr>
+            <tr>
+              <td><code>arun()</code></td>
+              <td class="loc">L207–L283</td>
+              <td>七步编号注释与本文档一致；三条退出条件
+                <span class="note">第 5 步去重、第 6 步 gather、第 7 步串行写回</span>
+              </td>
+            </tr>
+            <tr>
+              <td><code>run()</code></td>
+              <td class="loc">L286</td>
+              <td>同步入口的限制：不能在已有事件循环里调用，否则 <code>asyncio.run</code> 抛 RuntimeError</td>
+            </tr>
+            <tr>
+              <td><code>_think()</code></td>
+              <td class="loc">L298</td>
+              <td>三种情况：有 athink / 只有同步 think / 抛异常；<code>CancelledError</code> 不吞
+                <span class="note">"asyncio.timeout 到点抛 CancelledError，退出时转换成 TimeoutError"</span>
+              </td>
+            </tr>
+            <tr>
+              <td><code>_execute_action()</code></td>
+              <td class="loc">L328</td>
+              <td>临界区只包执行部分，排队中的调用不占线程、不消耗重试次数</td>
+            </tr>
+            <tr>
+              <td><code>_execute_with_retry()</code></td>
+              <td class="loc">L339</td>
+              <td>三阶段 + 失败分类表
+                <span class="note">"除取消外永不抛异常，所有失败都返回 ToolObservation"</span>
+              </td>
+            </tr>
+            <tr>
+              <td><code>_call_tool()</code></td>
+              <td class="loc">L432</td>
+              <td>入参约定：有参数模型走 kwargs，没有则传原始字符串
+                <span class="note">"to_thread 无法真正杀死线程，超时只是不再等它"</span>
+              </td>
+            </tr>
+            <tr>
+              <td><code>parse_response()</code></td>
+              <td class="loc">L461</td>
+              <td>贪婪 vs 非贪婪的取舍：Finish 取到最后一个 <code>]</code>，工具调用取到第一个 <code>]</code></td>
+            </tr>
+            <tr>
+              <td><code>_degrade()</code></td>
+              <td class="loc">L513</td>
+              <td>部分失败的最后保险：按 output 去重后拼「已收集信息 + 失败原因」</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ================= 06 ================= -->
+    <section id="cheatsheet" class="reveal">
+      <div class="sec-head"><span class="sec-num">06</span><h2>速查表</h2></div>
+      <p class="sec-sub">改参数、查状态、想确认「这条路径会不会崩」时看这里。</p>
+
+      <div class="cols">
+        <div class="card">
+          <h3>AgentConfig 默认值与边界</h3>
+          <div class="kv-line"><span>max_steps</span><span>5（1–20）</span></div>
+          <div class="kv-line"><span>max_concurrency</span><span>3（1–16）</span></div>
+          <div class="kv-line"><span>tool_timeout</span><span>20s（0–300）</span></div>
+          <div class="kv-line"><span>llm_timeout</span><span>90s（0–600）</span></div>
+          <div class="kv-line"><span>tool_retries</span><span>1（0–3，0 表示不重试）</span></div>
+        </div>
+
+        <div class="card">
+          <h3>ToolObservation.status</h3>
+          <div class="kv-line"><span>ok</span><span>工具正常返回</span></div>
+          <div class="kv-line"><span>invalid_args</span><span>Pydantic 校验拦截，工具未执行</span></div>
+          <div class="kv-line"><span>not_found</span><span>注册表里没有这个工具名</span></div>
+          <div class="kv-line"><span>timeout</span><span>连续超时，重试已用尽</span></div>
+          <div class="kv-line"><span>error</span><span>异常或不可重试错误</span></div>
+        </div>
+
+        <div class="card">
+          <h3>四条退出路径</h3>
+          <ul>
+            <li><b>E1</b> 拿到 <code>Finish[...]</code> → 返回答案（唯一正常出口）</li>
+            <li><b>D1</b> 模型调用失败或超时 → 降级</li>
+            <li><b>D2</b> 模型没给出合法 Action → 降级</li>
+            <li><b>D3</b> 达到 <code>max_steps</code> → 降级</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3>取消（CancelledError）的三条规矩</h3>
+          <ul>
+            <li>只在 <code>except asyncio.CancelledError: raise</code> 里出现，绝不改写</li>
+            <li>不被当成「工具失败」，不消耗重试次数</li>
+            <li>gather 会把取消传递给兄弟 Task，整轮一起退出</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>验证过的行为（离线假工具，不消耗搜索额度）</h3>
+        <ul>
+          <li>8 个 Action 同轮并发、<code>Semaphore=2</code> 时实测最大并发为 2</li>
+          <li>同步阻塞工具经 <code>to_thread</code> 正常返回，事件循环不卡</li>
+          <li>抛异常的工具 <code>attempts=2</code>（重试一次）后降级；超时工具同样</li>
+          <li>参数非法 <code>attempts=0</code>，工具函数未被调用</li>
+          <li>外层 <code>wait_for</code> 取消 → <code>TimeoutError</code> 正确向上传播</li>
+          <li>401（<code>retryable=False</code>）不重试，<code>attempts=1</code> 直接降级</li>
+        </ul>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  <span>对应源码 <code>src/uv_and_httpx/ReActAgent.py</code>（588 行，注释版）</span>
+  <span>离线可用 · 无外部依赖</span>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var btn = document.getElementById('themeToggle');
+    function sync() {
+      var dark = root.dataset.theme === 'dark';
+      btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+      btn.setAttribute('aria-label', dark ? '切换到浅色主题' : '切换到深色主题');
+    }
+    if (btn) {
+      sync();
+      btn.addEventListener('click', function () {
+        var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+        root.dataset.theme = next;
+        try { localStorage.setItem('react-async-theme', next); } catch (e) {}
+        sync();
+      });
+    }
+
+    var items = document.querySelectorAll('.reveal');
+    if (!('IntersectionObserver' in window) ||
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      items.forEach(function (el) { el.classList.add('in'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.06 });
+    items.forEach(function (el) { io.observe(el); });
+  })();
+</script>
+</body>
+</html>
